@@ -1,0 +1,15 @@
+services:
+  lofi-books:
+    build:
+      context: .
+      args:
+        VITE_MSAL_CLIENT_ID: ${VITE_MSAL_CLIENT_ID}
+        VITE_MSAL_AUTHORITY: ${VITE_MSAL_AUTHORITY}
+    networks:
+      - mini
+    restart: unless-stopped
+
+networks:
+  mini:
+    external: true
+    name: mini-dashboard_default

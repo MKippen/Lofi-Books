@@ -1,0 +1,358 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Lofi Japanese Bookstore Palette ──────────────────────────────── */
+  --color-primary: #7C9A6E;       /* Matcha green — calm, natural */
+  --color-secondary: #C4836A;     /* Terracotta — warm, earthy */
+  --color-accent: #8BAEC4;        /* Dusty sky blue — soft highlight */
+  --color-success: #8DB580;       /* Soft sage */
+  --color-warning: #D4A76A;       /* Warm amber */
+  --color-cream: #E8E0D2;         /* Warm latte parchment */
+  --color-indigo: #2C2C2C;        /* Soft charcoal (not harsh black) */
+  --color-surface: #FDFBF7;       /* Off-white paper */
+
+  --font-heading: "Zen Maru Gothic", "Kosugi Maru", sans-serif;
+  --font-body: "Nunito", sans-serif;
+  --font-reader: "Lora", serif;
+  --font-handwriting: "Caveat", cursive;
+}
+
+/* ── Base Styles ─────────────────────────────────────────────────────── */
+
+body {
+  background-color: var(--color-cream);
+  font-family: var(--font-body);
+  color: var(--color-indigo);
+  scroll-behavior: smooth;
+}
+
+/* ── Sakura Petal Animation ──────────────────────────────────────────── */
+
+@keyframes sakura-fall {
+  0% {
+    transform: translateY(-10%) translateX(0) rotate(0deg);
+    opacity: 1;
+  }
+  25% {
+    transform: translateY(25%) translateX(15px) rotate(90deg);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(50%) translateX(-10px) rotate(180deg);
+    opacity: 0.8;
+  }
+  75% {
+    transform: translateY(80%) translateX(20px) rotate(270deg);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(110%) translateX(-5px) rotate(360deg);
+    opacity: 0;
+  }
+}
+
+.sakura-petal {
+  position: absolute;
+  pointer-events: none;
+  animation: sakura-fall linear infinite;
+}
+
+/* ── Sparkle Animation ───────────────────────────────────────────────── */
+
+@keyframes sparkle {
+  0% {
+    transform: scale(0) rotate(0deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1) rotate(180deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0) rotate(360deg);
+    opacity: 0;
+  }
+}
+
+.sparkle {
+  position: absolute;
+  pointer-events: none;
+  animation: sparkle ease-in-out infinite;
+}
+
+/* ── Lofi Bookshop Background ────────────────────────────────────────── */
+
+.bookshop-bg {
+  position: relative;
+  background: linear-gradient(
+    165deg,
+    #EDE6DA 0%,     /* warm latte */
+    #E8E0D2 25%,    /* toasted cream */
+    #E5DDD0 50%,    /* old paper */
+    #EAE2D6 75%,    /* soft biscuit */
+    #E8DFD2 100%    /* warm sand */
+  );
+}
+
+.bookshop-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+
+  background:
+    /* Warm reading lamp glow — top left */
+    radial-gradient(
+      ellipse 50% 40% at 10% 6%,
+      rgba(212, 167, 106, 0.22) 0%,
+      transparent 65%
+    ),
+    /* Soft matcha glow — bottom right corner */
+    radial-gradient(
+      ellipse 40% 30% at 90% 90%,
+      rgba(124, 154, 110, 0.10) 0%,
+      transparent 50%
+    ),
+    /* Faint horizontal shelf lines */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 160px,
+      rgba(100, 70, 40, 0.04) 160px,
+      rgba(100, 70, 40, 0.06) 163px,
+      rgba(100, 70, 40, 0.04) 166px,
+      transparent 166px
+    ),
+    /* Ghost book spines */
+    repeating-linear-gradient(
+      to right,
+      transparent 0px,
+      transparent 32px,
+      rgba(100, 70, 40, 0.015) 32px,
+      rgba(100, 70, 40, 0.022) 33px,
+      transparent 33px,
+      transparent 65px
+    ),
+    /* Paper texture */
+    repeating-conic-gradient(
+      rgba(160, 140, 110, 0.035) 0% 25%,
+      transparent 0% 50%
+    ) 0 0 / 4px 4px;
+}
+
+.bookshop-bg > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Cork Board Texture ──────────────────────────────────────────────── */
+
+.cork-texture {
+  background:
+    repeating-conic-gradient(
+      #c4956a 0% 25%,
+      #d4a574 0% 50%
+    ) 0 0 / 20px 20px,
+    linear-gradient(
+      135deg,
+      #c4956a 0%,
+      #d4a574 25%,
+      #b8895e 50%,
+      #c9a07a 75%,
+      #c4956a 100%
+    );
+  background-color: #c4956a;
+}
+
+/* ── Custom Scrollbar ────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-cream);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--color-primary), var(--color-secondary));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #6B8A5E, #B07060);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-primary) var(--color-cream);
+}
+
+/* ── TipTap Editor ───────────────────────────────────────────────────── */
+
+.ProseMirror {
+  min-height: 200px;
+  outline: none;
+  padding: 1rem;
+  font-family: var(--font-reader);
+  line-height: 1.75;
+}
+
+.ProseMirror:focus {
+  outline: none;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #9ca3af;
+  font-style: italic;
+  pointer-events: none;
+  height: 0;
+}
+
+/* ── Page Flip Animation ─────────────────────────────────────────────── */
+
+@keyframes page-flip {
+  0% {
+    transform: perspective(1200px) rotateY(0deg);
+    transform-origin: left center;
+  }
+  100% {
+    transform: perspective(1200px) rotateY(-180deg);
+    transform-origin: left center;
+  }
+}
+
+.page-flip {
+  animation: page-flip 0.6s ease-in-out;
+}
+
+/* ── Manga Panel ─────────────────────────────────────────────────────── */
+
+.manga-panel {
+  border: 3px solid #2C2C2C;
+  box-shadow: 4px 4px 0px rgba(44, 44, 44, 0.2);
+  background: var(--color-surface);
+}
+
+/* ── Pushpin ─────────────────────────────────────────────────────────── */
+
+.pushpin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #A8C49A, #6B8A5E);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.15),
+    0 4px 6px -1px rgba(0, 0, 0, 0.2);
+  position: relative;
+}
+
+.pushpin::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #C8DFC0, #A8C49A);
+  transform: translate(-50%, -50%);
+}
+
+/* ── Reader Content Prose ───────────────────────────────────────────── */
+
+.reader-content p {
+  margin-bottom: 1rem;
+  text-indent: 2em;
+}
+
+.reader-content p:first-child {
+  text-indent: 0;
+}
+
+.reader-content h1,
+.reader-content h2,
+.reader-content h3 {
+  font-family: var(--font-heading);
+  color: var(--color-primary);
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+.reader-content h1 {
+  font-size: 1.75rem;
+}
+
+.reader-content h2 {
+  font-size: 1.5rem;
+}
+
+.reader-content h3 {
+  font-size: 1.25rem;
+}
+
+.reader-content strong,
+.reader-content b {
+  font-weight: 700;
+}
+
+.reader-content em,
+.reader-content i {
+  font-style: italic;
+}
+
+.reader-content blockquote {
+  border-left: 3px solid var(--color-primary);
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: #5A5A5A;
+  font-style: italic;
+}
+
+.reader-content ul,
+.reader-content ol {
+  margin: 1rem 0;
+  padding-left: 2rem;
+}
+
+.reader-content li {
+  margin-bottom: 0.5rem;
+}
+
+.reader-content hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--color-primary), transparent);
+  margin: 2rem 0;
+}
+
+/* ── Touch Device Helpers ────────────────────────────────────────────── */
+
+/* On touch-only devices (no hover), always show hover-dependent elements */
+@media (hover: none) {
+  .touch-show {
+    opacity: 1 !important;
+  }
+  /* Make touch targets bigger */
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* ── iPad / Tablet Layout Helpers ────────────────────────────────────── */
+
+@media (max-width: 1023px) {
+  /* Reduce page padding on tablet */
+  .page-padding {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
