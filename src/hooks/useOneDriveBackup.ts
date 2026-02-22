@@ -110,13 +110,6 @@ export function useOneDriveBackup() {
       try {
         const token = await getAccessToken();
 
-        // Debug: log token scopes
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          console.log('[Backup] Token scopes:', payload.scp || payload.scope || 'none');
-          console.log('[Backup] Token audience:', payload.aud);
-        } catch { /* ignore */ }
-
         const hasAccess = await validateOneDriveAccess(token);
         if (!hasAccess) {
           setState((prev) => ({
@@ -136,19 +129,11 @@ export function useOneDriveBackup() {
         const localHasData = localBookCount > 0;
 
         if (remoteMeta && !localHasData) {
-          // OneDrive has data, local is empty -> auto-restore
-          setState((prev) => ({ ...prev, status: 'restoring' }));
-          await restoreFromBackup(token);
-          window.location.reload();
-          return;
-        } else if (remoteMeta && localHasData) {
-          // Both have data -> show dialog to let user choose
+          // OneDrive has data, local is empty (new device) -> offer restore
           setRemoteMetadata(remoteMeta);
           setShowRestoreDialog(true);
-        }
-
-        // If no remote backup and local has data -> do initial backup
-        if (!remoteMeta && localHasData) {
+        } else if (localHasData) {
+          // Local has data -> just back up silently
           setState((prev) => ({ ...prev, status: 'backing-up' }));
           await performBackup(token, email);
           setState((prev) => ({
@@ -156,11 +141,6 @@ export function useOneDriveBackup() {
             lastBackupTime: new Date(),
             status: 'idle',
           }));
-        }
-
-        // If both empty -> just mark as connected, no action needed
-        if (!remoteMeta && !localHasData) {
-          setState((prev) => ({ ...prev, status: 'idle' }));
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
