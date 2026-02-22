@@ -9,6 +9,18 @@ services:
       - mini
     restart: unless-stopped
 
+  lofi-books-api:
+    build:
+      context: ./server
+    volumes:
+      - lofi-data:/data
+    networks:
+      - mini
+    restart: unless-stopped
+
+volumes:
+  lofi-data:
+
 networks:
   mini:
     external: true

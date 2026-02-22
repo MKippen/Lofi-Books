@@ -1,9 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink, useParams } from 'react-router'
-import { db } from '@/db/database'
-import { useAuth } from '@/hooks/useAuth'
-import { useBackupContext } from '@/providers/BackupProvider'
-import BackupStatus from '@/components/ui/BackupStatus'
+import { getBook } from '@/api/books'
 import {
   BookOpen,
   LayoutDashboard,
@@ -13,8 +10,7 @@ import {
   BookText,
   ArrowLeft,
   Star,
-  LogOut,
-  Shield,
+  Settings,
 } from 'lucide-react'
 
 const navItems = [
@@ -34,14 +30,12 @@ export default function Sidebar() {
   const { bookId } = useParams<{ bookId: string }>()
   const basePath = `/book/${bookId}`
   const [bookTitle, setBookTitle] = useState('My Book')
-  const { displayName, isAdmin, logout } = useAuth()
-  const { state: backupState, manualBackup } = useBackupContext()
 
   useEffect(() => {
     if (!bookId) return
-    db.books.get(bookId).then((book) => {
+    getBook(bookId).then((book) => {
       if (book) setBookTitle(book.title)
-    })
+    }).catch(() => { /* ignore */ })
   }, [bookId])
 
   return (
@@ -161,33 +155,15 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* User info + sign out */}
-      <div className="relative px-3 pb-1">
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl">
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-white/50 truncate flex items-center gap-1">
-              {isAdmin && <Shield size={10} className="text-primary flex-shrink-0" />}
-              {displayName}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={logout}
-            className="p-1.5 rounded-lg text-white/20 hover:text-white/60 hover:bg-white/[0.06] transition-colors cursor-pointer"
-            title="Sign out"
-          >
-            <LogOut size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* OneDrive backup status */}
-      <div className="relative px-3 pb-2">
-        <BackupStatus state={backupState} onManualBackup={manualBackup} variant="sidebar" />
-      </div>
-
-      {/* Back to books */}
-      <div className="relative px-3 pb-6">
+      {/* Settings + Back to books */}
+      <div className="relative px-3 pb-6 space-y-0.5">
+        <NavLink
+          to="/settings"
+          className="flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm text-white/30 transition-all hover:bg-white/[0.06] hover:text-white/70"
+        >
+          <Settings className="h-5 w-5" />
+          <span>Settings</span>
+        </NavLink>
         <NavLink
           to="/"
           className="flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm text-white/30 transition-all hover:bg-white/[0.06] hover:text-white/70"

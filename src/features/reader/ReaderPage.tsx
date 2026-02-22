@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { ArrowLeft, Users } from 'lucide-react';
-import { db } from '@/db/database';
+import { getBook } from '@/api/books';
+import { listChapters } from '@/api/chapters';
+import { listCharacters } from '@/api/characters';
 import type { Book, Chapter, Character } from '@/types';
 import { paginateHTML } from '@/utils/textUtils';
 import BookPage from './BookPage';
@@ -27,15 +29,19 @@ export default function ReaderPage() {
     if (!bookId) return;
 
     async function load() {
-      const [fetchedBook, fetchedChapters, fetchedCharacters] = await Promise.all([
-        db.books.get(bookId!),
-        db.chapters.where('bookId').equals(bookId!).sortBy('sortOrder'),
-        db.characters.where('bookId').equals(bookId!).toArray(),
-      ]);
+      try {
+        const [fetchedBook, fetchedChapters, fetchedCharacters] = await Promise.all([
+          getBook(bookId!),
+          listChapters(bookId!),
+          listCharacters(bookId!),
+        ]);
 
-      setBook(fetchedBook ?? null);
-      setChapters(fetchedChapters);
-      setCharacters(fetchedCharacters);
+        setBook(fetchedBook ?? null);
+        setChapters(fetchedChapters);
+        setCharacters(fetchedCharacters);
+      } catch {
+        setBook(null);
+      }
       setLoading(false);
     }
 

@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, subscribe, notifyChange } from '@/db/database';
+import { subscribe, notifyChange } from '@/api/notify';
+import {
+  listTimelineEvents, createTimelineEventApi,
+  updateTimelineEventApi, deleteTimelineEventApi, reorderTimelineEventsApi,
+} from '@/api/timeline';
 import type { TimelineEvent } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -16,10 +20,7 @@ export function useTimelineEvents(bookId: string | undefined) {
       setLoading(false);
       return;
     }
-    const result = await db.timelineEvents
-      .where('bookId')
-      .equals(bookId)
-      .sortBy('sortOrder');
+    const result = await listTimelineEvents(bookId);
     setEvents(result);
     setLoading(false);
   }, [bookId]);
@@ -40,14 +41,8 @@ export function useTimelineEvents(bookId: string | undefined) {
 export async function createTimelineEvent(
   data: Omit<TimelineEvent, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<string> {
-  const now = new Date();
-  const id = crypto.randomUUID();
-  await db.timelineEvents.add({
-    ...data,
-    id,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const { bookId, ...rest } = data;
+  const id = await createTimelineEventApi(bookId, rest);
   notifyChange();
   return id;
 }
@@ -56,27 +51,19 @@ export async function updateTimelineEvent(
   id: string,
   data: Partial<Omit<TimelineEvent, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.timelineEvents.update(id, {
-    ...data,
-    updatedAt: new Date(),
-  });
+  await updateTimelineEventApi(id, data);
   notifyChange();
 }
 
 export async function deleteTimelineEvent(id: string): Promise<void> {
-  await db.timelineEvents.delete(id);
+  await deleteTimelineEventApi(id);
   notifyChange();
 }
 
 export async function reorderTimelineEvents(
-  _bookId: string,
+  bookId: string,
   orderedIds: string[],
 ): Promise<void> {
-  await db.transaction('rw', db.timelineEvents, async () => {
-    const updates = orderedIds.map((eventId, index) =>
-      db.timelineEvents.update(eventId, { sortOrder: index }),
-    );
-    await Promise.all(updates);
-  });
+  await reorderTimelineEventsApi(bookId, orderedIds);
   notifyChange();
 }

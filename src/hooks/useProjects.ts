@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, subscribe, notifyChange } from '@/db/database';
+import { subscribe, notifyChange } from '@/api/notify';
+import { listBooks, getBook, createBookApi, updateBookApi, deleteBookApi } from '@/api/books';
 import type { Book } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -11,7 +12,7 @@ export function useBooks() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    const result = await db.books.orderBy('createdAt').reverse().toArray();
+    const result = await listBooks();
     setBooks(result);
     setLoading(false);
   }, []);
@@ -35,8 +36,12 @@ export function useBook(id: string | undefined) {
       setLoading(false);
       return;
     }
-    const result = await db.books.get(id);
-    setBook(result);
+    try {
+      const result = await getBook(id);
+      setBook(result);
+    } catch {
+      setBook(undefined);
+    }
     setLoading(false);
   }, [id]);
 
@@ -56,14 +61,7 @@ export function useBook(id: string | undefined) {
 export async function createBook(
   data: Omit<Book, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<string> {
-  const now = new Date();
-  const id = crypto.randomUUID();
-  await db.books.add({
-    ...data,
-    id,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const id = await createBookApi(data);
   notifyChange();
   return id;
 }
@@ -72,26 +70,11 @@ export async function updateBook(
   id: string,
   data: Partial<Omit<Book, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.books.update(id, {
-    ...data,
-    updatedAt: new Date(),
-  });
+  await updateBookApi(id, data);
   notifyChange();
 }
 
 export async function deleteBook(id: string): Promise<void> {
-  await db.transaction(
-    'rw',
-    [db.books, db.characters, db.ideas, db.timelineEvents, db.chapters, db.storedImages],
-    async () => {
-      // Delete all related data for this book
-      await db.characters.where('bookId').equals(id).delete();
-      await db.ideas.where('bookId').equals(id).delete();
-      await db.timelineEvents.where('bookId').equals(id).delete();
-      await db.chapters.where('bookId').equals(id).delete();
-      await db.storedImages.where('bookId').equals(id).delete();
-      await db.books.delete(id);
-    },
-  );
+  await deleteBookApi(id);
   notifyChange();
 }

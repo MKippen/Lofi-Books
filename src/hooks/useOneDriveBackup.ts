@@ -1,19 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './useAuth';
-import { subscribe, db } from '@/db/database';
 import {
-  performBackup,
-  restoreFromBackup,
-  getRemoteBackupInfo,
-} from '@/db/backupService';
-import { validateOneDriveAccess, ensureBackupFolder } from '@/utils/graphClient';
-import type { BackupState, BackupMetadata } from '@/types';
+  getBackupStatus,
+  registerBackupToken,
+  triggerBackup,
+} from '@/api/backup';
+import type { BackupState } from '@/types';
 
-const BACKUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const DEBOUNCE_BACKUP_MS = 30 * 1000;     // 30-second debounce for action-triggered backups
+const TOKEN_REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const STATUS_POLL_INTERVAL_MS = 60 * 1000; // 1 minute
 
 export function useOneDriveBackup() {
-  const { getAccessToken, email, isAuthenticated } = useAuth();
+  const { getAccessToken, isAuthenticated } = useAuth();
 
   const [state, setState] = useState<BackupState>({
     status: 'idle',
@@ -22,31 +20,54 @@ export function useOneDriveBackup() {
     isOneDriveConnected: false,
   });
 
-  const [showRestoreDialog, setShowRestoreDialog] = useState(false);
-  const [remoteMetadata, setRemoteMetadata] = useState<BackupMetadata | null>(null);
-
-  const backupInProgressRef = useRef(false);
-  const debouncedBackupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const initializedRef = useRef(false);
 
-  // Core backup function
-  const doBackup = useCallback(async () => {
-    if (backupInProgressRef.current || !isAuthenticated) return;
-
-    backupInProgressRef.current = true;
-    setState((prev) => ({ ...prev, status: 'backing-up' }));
-
+  // Send the MSAL token to the server so it can do OneDrive backups
+  const sendTokenToServer = useCallback(async () => {
+    if (!isAuthenticated) return;
     try {
       const token = await getAccessToken();
-      const metadata = await performBackup(token, email);
+      await registerBackupToken(token);
+      setState((prev) => ({ ...prev, isOneDriveConnected: true }));
+    } catch (err) {
+      console.error('Failed to send token to server:', err);
+      setState((prev) => ({
+        ...prev,
+        isOneDriveConnected: false,
+        lastBackupError: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }, [getAccessToken, isAuthenticated]);
+
+  // Poll backup status from the server
+  const pollStatus = useCallback(async () => {
+    try {
+      const status = await getBackupStatus();
+      setState((prev) => ({
+        ...prev,
+        isOneDriveConnected: status.isConnected,
+        lastBackupTime: status.lastBackupTime ? new Date(status.lastBackupTime) : prev.lastBackupTime,
+        lastBackupError: status.lastBackupError,
+        status: status.backupInProgress ? 'backing-up' : (status.lastBackupError ? 'error' : 'idle'),
+      }));
+    } catch {
+      // Server might not be reachable — don't overwrite state
+    }
+  }, []);
+
+  // Manual backup trigger
+  const manualBackup = useCallback(async () => {
+    if (!isAuthenticated) return;
+    setState((prev) => ({ ...prev, status: 'backing-up' }));
+    try {
+      const token = await getAccessToken();
+      await triggerBackup(token);
       setState((prev) => ({
         ...prev,
         status: 'success',
-        lastBackupTime: new Date(metadata.timestamp),
+        lastBackupTime: new Date(),
         lastBackupError: null,
       }));
-
       setTimeout(() => {
         setState((prev) =>
           prev.status === 'success' ? { ...prev, status: 'idle' } : prev,
@@ -54,164 +75,50 @@ export function useOneDriveBackup() {
       }, 3000);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Backup failed';
-      console.error('Backup failed:', err);
-      setState((prev) => ({
-        ...prev,
-        status: 'error',
-        lastBackupError: message,
-      }));
-    } finally {
-      backupInProgressRef.current = false;
-    }
-  }, [getAccessToken, email, isAuthenticated]);
-
-  // Debounced backup (for action-triggered)
-  const triggerBackup = useCallback(() => {
-    if (debouncedBackupTimerRef.current) {
-      clearTimeout(debouncedBackupTimerRef.current);
-    }
-    debouncedBackupTimerRef.current = setTimeout(() => {
-      doBackup();
-    }, DEBOUNCE_BACKUP_MS);
-  }, [doBackup]);
-
-  // Restore function
-  const doRestore = useCallback(async () => {
-    setState((prev) => ({ ...prev, status: 'restoring' }));
-    try {
-      const token = await getAccessToken();
-      await restoreFromBackup(token);
-      setState((prev) => ({
-        ...prev,
-        status: 'idle',
-        lastBackupError: null,
-      }));
-      setShowRestoreDialog(false);
-      window.location.reload();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Restore failed';
       setState((prev) => ({
         ...prev,
         status: 'error',
         lastBackupError: message,
       }));
     }
-  }, [getAccessToken]);
+  }, [getAccessToken, isAuthenticated]);
 
-  // Manual backup
-  const manualBackup = useCallback(() => doBackup(), [doBackup]);
-
-  // Initialization: validate OneDrive + check for restore
+  // Initialization: send token + trigger first backup
   useEffect(() => {
     if (!isAuthenticated || initializedRef.current) return;
     initializedRef.current = true;
 
     const initialize = async () => {
+      await sendTokenToServer();
+      // Trigger initial backup after registering token
       try {
         const token = await getAccessToken();
-
-        const hasAccess = await validateOneDriveAccess(token);
-        if (!hasAccess) {
-          setState((prev) => ({
-            ...prev,
-            isOneDriveConnected: false,
-            status: 'error',
-            lastBackupError: 'OneDrive access denied. Please check your permissions.',
-          }));
-          return;
-        }
-
-        await ensureBackupFolder(token);
-        setState((prev) => ({ ...prev, isOneDriveConnected: true }));
-
-        const remoteMeta = await getRemoteBackupInfo(token);
-        const localBookCount = await db.books.count();
-        const localHasData = localBookCount > 0;
-
-        if (remoteMeta && !localHasData) {
-          // OneDrive has data, local is empty (new device) -> offer restore
-          setRemoteMetadata(remoteMeta);
-          setShowRestoreDialog(true);
-        } else if (localHasData) {
-          // Local has data -> just back up silently
-          setState((prev) => ({ ...prev, status: 'backing-up' }));
-          await performBackup(token, email);
-          setState((prev) => ({
-            ...prev,
-            lastBackupTime: new Date(),
-            status: 'idle',
-          }));
-        }
+        await triggerBackup(token);
+        await pollStatus();
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.error('Backup initialization failed:', errMsg, err);
-        setState((prev) => ({
-          ...prev,
-          status: 'error',
-          lastBackupError: errMsg,
-          isOneDriveConnected: false,
-        }));
+        console.error('Initial backup failed:', err);
       }
     };
 
     initialize();
-  }, [isAuthenticated, getAccessToken, email]);
+  }, [isAuthenticated, sendTokenToServer, getAccessToken, pollStatus]);
 
-  // Periodic backup (every 5 minutes)
+  // Periodically refresh token on the server
   useEffect(() => {
-    if (!isAuthenticated || !state.isOneDriveConnected) return;
+    if (!isAuthenticated) return;
+    const interval = setInterval(sendTokenToServer, TOKEN_REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, sendTokenToServer]);
 
-    intervalRef.current = setInterval(doBackup, BACKUP_INTERVAL_MS);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [isAuthenticated, state.isOneDriveConnected, doBackup]);
-
-  // Backup on data changes (debounced)
+  // Periodically poll backup status
   useEffect(() => {
-    if (!isAuthenticated || !state.isOneDriveConnected) return;
-
-    const unsubscribe = subscribe(() => {
-      triggerBackup();
-    });
-
-    return () => {
-      unsubscribe();
-      if (debouncedBackupTimerRef.current) {
-        clearTimeout(debouncedBackupTimerRef.current);
-      }
-    };
-  }, [isAuthenticated, state.isOneDriveConnected, triggerBackup]);
-
-  // Backup on window blur and beforeunload
-  useEffect(() => {
-    if (!isAuthenticated || !state.isOneDriveConnected) return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        doBackup();
-      }
-    };
-
-    const handleBeforeUnload = () => {
-      doBackup();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [isAuthenticated, state.isOneDriveConnected, doBackup]);
+    if (!isAuthenticated) return;
+    const interval = setInterval(pollStatus, STATUS_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, pollStatus]);
 
   return {
     ...state,
-    showRestoreDialog,
-    remoteMetadata,
-    doRestore,
-    dismissRestoreDialog: () => setShowRestoreDialog(false),
     manualBackup,
   };
 }

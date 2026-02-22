@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { BookOpen, Plus, LogOut, Shield, Cloud } from 'lucide-react';
+import { BookOpen, Plus, LogOut, Shield, Cloud, Settings } from 'lucide-react';
+import { useNavigate } from 'react-router';
 import { useBooks } from '@/hooks/useProjects';
 import { useAuth } from '@/hooks/useAuth';
 import SakuraParticles from '@/components/anime/SakuraParticles';
@@ -9,18 +10,20 @@ import EmptyState from '@/components/ui/EmptyState';
 import ProjectList from '@/features/projects/ProjectList';
 import CreateProjectModal from '@/features/projects/CreateProjectModal';
 
-function SkeletonCard() {
+function SkeletonBook() {
   return (
-    <div className="rounded-2xl bg-surface shadow-md border border-primary/10 overflow-hidden animate-pulse">
-      <div className="h-40 bg-gray-200 rounded-t-xl" />
-      <div className="p-4 space-y-3">
-        <div className="h-5 bg-gray-200 rounded w-3/4" />
-        <div className="h-4 bg-gray-100 rounded-full w-16" />
-        <div className="space-y-1.5">
-          <div className="h-3 bg-gray-100 rounded w-full" />
-          <div className="h-3 bg-gray-100 rounded w-2/3" />
+    <div className="flex flex-col items-center">
+      <div className="book-3d book-3d-skeleton">
+        <div className="book-3d-inner">
+          <div className="book-cover" />
+          <div className="book-spine" />
+          <div className="book-pages" />
+          <div className="book-bottom" />
         </div>
-        <div className="h-3 bg-gray-100 rounded w-1/3" />
+      </div>
+      <div className="mt-3 space-y-1.5 flex flex-col items-center">
+        <div className="h-4 bg-gray-200 rounded w-24 animate-pulse" />
+        <div className="h-3 bg-gray-100 rounded-full w-14 animate-pulse" />
       </div>
     </div>
   );
@@ -29,6 +32,7 @@ function SkeletonCard() {
 export default function HomePage() {
   const { books, loading } = useBooks();
   const { displayName, email, isAdmin, logout } = useAuth();
+  const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const createButton = (
@@ -53,8 +57,16 @@ export default function HomePage() {
           <span className="text-xs text-indigo/30 hidden md:inline">({email})</span>
           <button
             type="button"
-            onClick={logout}
+            onClick={() => navigate('/settings')}
             className="ml-1 p-1.5 rounded-full text-indigo/20 hover:text-indigo/60 hover:bg-indigo/5 transition-colors cursor-pointer"
+            title="Settings"
+          >
+            <Settings size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={logout}
+            className="p-1.5 rounded-full text-indigo/20 hover:text-indigo/60 hover:bg-indigo/5 transition-colors cursor-pointer"
             title="Sign out"
           >
             <LogOut size={14} />
@@ -75,10 +87,10 @@ export default function HomePage() {
         {/* Content */}
         <div className="w-full max-w-5xl">
           {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <SkeletonCard />
-              <SkeletonCard />
-              <SkeletonCard />
+            <div className="flex flex-wrap justify-center gap-8">
+              <SkeletonBook />
+              <SkeletonBook />
+              <SkeletonBook />
             </div>
           ) : books.length === 0 ? (
             <EmptyState
@@ -89,8 +101,8 @@ export default function HomePage() {
             />
           ) : (
             <>
-              <div className="flex justify-end mb-6">{createButton}</div>
               <ProjectList books={books} />
+              <div className="flex justify-center mt-10">{createButton}</div>
             </>
           )}
         </div>

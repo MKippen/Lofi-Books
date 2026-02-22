@@ -3,8 +3,8 @@ import { updateIdea, bringToFront, deleteIdea } from '@/hooks/useIdeas';
 import StickyNote from './StickyNote';
 import PolaroidPhoto from './PolaroidPhoto';
 import ChapterIdeaCard from './ChapterIdeaCard';
-import type { Idea } from '@/types';
-import { IDEA_COLORS } from '@/types';
+import type { Idea, Connection, StringColor } from '@/types';
+import { IDEA_COLORS, STRING_COLORS } from '@/types';
 
 // Fixed canvas dimensions
 const CANVAS_WIDTH = 3000;
@@ -21,6 +21,12 @@ interface InfiniteCorkBoardProps {
   ideas: Idea[];
   bookId: string;
   onEditIdea: (idea: Idea) => void;
+  connections?: Connection[];
+  connectMode?: boolean;
+  connectFrom?: string | null;
+  onConnectClick?: (ideaId: string) => void;
+  onDeleteConnection?: (connectionId: string) => void;
+  onChangeConnectionColor?: (connectionId: string, color: StringColor) => void;
 }
 
 interface DragState {
@@ -32,7 +38,11 @@ interface DragState {
   hasMoved: boolean;
 }
 
-export default function InfiniteCorkBoard({ ideas, bookId, onEditIdea }: InfiniteCorkBoardProps) {
+export default function InfiniteCorkBoard({
+  ideas, bookId, onEditIdea,
+  connections = [], connectMode = false, connectFrom = null,
+  onConnectClick, onDeleteConnection, onChangeConnectionColor,
+}: InfiniteCorkBoardProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const panRef = useRef<{
@@ -46,6 +56,7 @@ export default function InfiniteCorkBoard({ ideas, bookId, onEditIdea }: Infinit
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
   const [viewport, setViewport] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
 
   // Track scroll position + viewport size for the mini-map
   useEffect(() => {
@@ -147,13 +158,15 @@ export default function InfiniteCorkBoard({ ideas, bookId, onEditIdea }: Infinit
       });
 
       await updateIdea(idea.id, { positionX: newX, positionY: newY });
+    } else if (connectMode && onConnectClick) {
+      onConnectClick(idea.id);
     } else {
       await bringToFront(idea.id, bookId);
     }
 
     dragRef.current = null;
     setDraggingId(null);
-  }, [bookId, clampX, clampY]);
+  }, [bookId, clampX, clampY, connectMode, onConnectClick]);
 
   const handleIdeaDoubleClick = useCallback((e: React.MouseEvent, idea: Idea) => {
     e.stopPropagation();
@@ -171,6 +184,9 @@ export default function InfiniteCorkBoard({ ideas, bookId, onEditIdea }: Infinit
   const handleCanvasPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0) return;
     if (e.target !== e.currentTarget) return;
+
+    // Dismiss any selected connection
+    setSelectedConnectionId(null);
 
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -259,16 +275,26 @@ export default function InfiniteCorkBoard({ ideas, bookId, onEditIdea }: Infinit
     }
   };
 
+  // Build a quick lookup for idea positions (including drag offsets)
+  const getIdeaCenter = (ideaId: string) => {
+    const idea = ideas.find((i) => i.id === ideaId);
+    if (!idea) return null;
+    const offset = dragOffsets[idea.id];
+    const x = clampX(idea.positionX + (offset?.x ?? 0)) + CARD_WIDTH / 2;
+    const y = clampY(idea.positionY + (offset?.y ?? 0)) + CARD_HEIGHT / 2;
+    return { x, y };
+  };
+
   // Mini-map viewport rectangle (scaled down)
   const vpScaleX = MINIMAP_WIDTH / CANVAS_WIDTH;
   const vpScaleY = MINIMAP_HEIGHT / CANVAS_HEIGHT;
 
   return (
     <div className="w-full h-full relative overflow-hidden">
-      {/* Scrollable area */}
+      {/* Scrollable area — scrollbars hidden, navigate via drag or minimap */}
       <div
         ref={scrollContainerRef}
-        className="w-full h-full overflow-auto"
+        className="w-full h-full overflow-hidden"
       >
         {/* Canvas */}
         <div
@@ -288,12 +314,106 @@ export default function InfiniteCorkBoard({ ideas, bookId, onEditIdea }: Infinit
             }}
           />
 
+          {/* String connections SVG layer */}
+          <svg
+            className="absolute inset-0 pointer-events-none"
+            width={CANVAS_WIDTH}
+            height={CANVAS_HEIGHT}
+            style={{ zIndex: 1 }}
+          >
+            {connections.map((conn) => {
+              const from = getIdeaCenter(conn.fromIdeaId);
+              const to = getIdeaCenter(conn.toIdeaId);
+              if (!from || !to) return null;
+
+              const color = STRING_COLORS[conn.color as StringColor] || STRING_COLORS.red;
+              const isSelected = selectedConnectionId === conn.id;
+
+              // Quadratic bezier with gravity sag
+              const midX = (from.x + to.x) / 2;
+              const dist = Math.sqrt((to.x - from.x) ** 2 + (to.y - from.y) ** 2);
+              const sag = Math.min(dist * 0.15, 60);
+              const midY = (from.y + to.y) / 2 + sag;
+              const path = `M ${from.x} ${from.y} Q ${midX} ${midY} ${to.x} ${to.y}`;
+
+              return (
+                <g key={conn.id}>
+                  {/* Wider invisible hit area for clicking */}
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={16}
+                    className="pointer-events-auto cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedConnectionId(isSelected ? null : conn.id);
+                    }}
+                  />
+                  {/* Visible string */}
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={isSelected ? 4 : 2.5}
+                    strokeLinecap="round"
+                    opacity={isSelected ? 1 : 0.7}
+                    style={{ filter: isSelected ? `drop-shadow(0 0 4px ${color})` : undefined }}
+                  />
+                  {/* Pins at endpoints */}
+                  <circle cx={from.x} cy={from.y} r={4} fill={color} opacity={0.9} />
+                  <circle cx={to.x} cy={to.y} r={4} fill={color} opacity={0.9} />
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* Selected connection toolbar */}
+          {selectedConnectionId && (() => {
+            const conn = connections.find((c) => c.id === selectedConnectionId);
+            if (!conn) return null;
+            const from = getIdeaCenter(conn.fromIdeaId);
+            const to = getIdeaCenter(conn.toIdeaId);
+            if (!from || !to) return null;
+
+            const toolbarX = (from.x + to.x) / 2;
+            const toolbarY = (from.y + to.y) / 2 - 40;
+
+            return (
+              <div
+                className="absolute z-[9998] flex items-center gap-1 bg-surface/95 backdrop-blur rounded-full px-2 py-1 shadow-lg border border-primary/20"
+                style={{ left: toolbarX, top: toolbarY, transform: 'translate(-50%, -50%)' }}
+              >
+                {(Object.entries(STRING_COLORS) as [StringColor, string][]).map(([name, hex]) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => onChangeConnectionColor?.(conn.id, name)}
+                    className={`w-4 h-4 rounded-full border transition-transform cursor-pointer ${
+                      conn.color === name ? 'scale-125 border-indigo/40' : 'border-transparent hover:scale-110'
+                    }`}
+                    style={{ backgroundColor: hex }}
+                  />
+                ))}
+                <div className="w-px h-4 bg-indigo/15 mx-0.5" />
+                <button
+                  type="button"
+                  onClick={() => { onDeleteConnection?.(conn.id); setSelectedConnectionId(null); }}
+                  className="text-red-400 hover:text-red-500 text-xs font-semibold px-1 cursor-pointer"
+                >
+                  Delete
+                </button>
+              </div>
+            );
+          })()}
+
           {/* Idea cards */}
           {ideas.map((idea) => {
             const offset = dragOffsets[idea.id];
             const posX = clampX(idea.positionX + (offset?.x ?? 0));
             const posY = clampY(idea.positionY + (offset?.y ?? 0));
             const isDragging = draggingId === idea.id;
+            const isConnectSource = connectMode && connectFrom === idea.id;
 
             return (
               <div
@@ -303,9 +423,16 @@ export default function InfiniteCorkBoard({ ideas, bookId, onEditIdea }: Infinit
                   left: posX,
                   top: posY,
                   zIndex: isDragging ? 9999 : idea.zIndex,
-                  cursor: isDragging ? 'grabbing' : 'grab',
+                  cursor: connectMode ? 'crosshair' : isDragging ? 'grabbing' : 'grab',
                   transition: isDragging ? 'none' : 'box-shadow 0.2s',
-                  filter: isDragging ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.25))' : undefined,
+                  filter: isDragging
+                    ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.25))'
+                    : isConnectSource
+                      ? 'drop-shadow(0 0 8px rgba(196, 64, 64, 0.6))'
+                      : undefined,
+                  outline: isConnectSource ? '3px solid #C44040' : undefined,
+                  outlineOffset: '2px',
+                  borderRadius: '12px',
                 }}
                 onPointerDown={(e) => handleIdeaPointerDown(e, idea)}
                 onPointerMove={handleIdeaPointerMove}
@@ -329,6 +456,33 @@ export default function InfiniteCorkBoard({ ideas, bookId, onEditIdea }: Infinit
       >
         {/* Mini-map background */}
         <div className="absolute inset-0 cork-texture opacity-80" />
+
+        {/* Connection lines on minimap */}
+        <svg
+          className="absolute inset-0 pointer-events-none"
+          width={MINIMAP_WIDTH}
+          height={MINIMAP_HEIGHT}
+        >
+          {connections.map((conn) => {
+            const from = getIdeaCenter(conn.fromIdeaId);
+            const to = getIdeaCenter(conn.toIdeaId);
+            if (!from || !to) return null;
+
+            const color = STRING_COLORS[conn.color as StringColor] || STRING_COLORS.red;
+            return (
+              <line
+                key={conn.id}
+                x1={from.x * vpScaleX}
+                y1={from.y * vpScaleY}
+                x2={to.x * vpScaleX}
+                y2={to.y * vpScaleY}
+                stroke={color}
+                strokeWidth={1}
+                opacity={0.6}
+              />
+            );
+          })}
+        </svg>
 
         {/* Idea dots */}
         {ideas.map((idea) => {

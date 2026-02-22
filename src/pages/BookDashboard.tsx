@@ -15,6 +15,7 @@ import { useCharacters } from '@/hooks/useCharacters';
 import { useIdeas } from '@/hooks/useIdeas';
 import { useTimelineEvents } from '@/hooks/useTimeline';
 import { useChapters } from '@/hooks/useChapters';
+import { useImage } from '@/hooks/useImageStore';
 import TopBar from '@/components/layout/TopBar';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
@@ -51,6 +52,7 @@ export default function BookDashboard() {
   const { events } = useTimelineEvents(bookId);
   const { chapters } = useChapters(bookId);
 
+  const { url: coverUrl } = useImage(book?.coverImageId);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -130,20 +132,33 @@ export default function BookDashboard() {
       </TopBar>
 
       <div className="flex-1 p-8">
-        {/* Book info */}
-        <div className="mb-8 space-y-2">
-          {book.genre && (
-            <Badge variant="secondary" size="md">
-              {book.genre}
-            </Badge>
-          )}
-          {book.description && (
-            <p className="text-indigo/70 text-sm max-w-2xl">{book.description}</p>
-          )}
-          <p className="text-xs text-indigo/40">
-            Created {formatDistanceToNow(book.createdAt, { addSuffix: true })} &middot;
-            Updated {formatDistanceToNow(book.updatedAt, { addSuffix: true })}
-          </p>
+        {/* Book info with cover */}
+        <div className="mb-8 flex items-start gap-6">
+          {/* Cover image / placeholder */}
+          <div className="shrink-0 w-28 h-40 rounded-md overflow-hidden shadow-md border border-primary/10">
+            {coverUrl ? (
+              <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+                <BookOpen size={32} className="text-white/50" strokeWidth={1.5} />
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2 min-w-0">
+            {book.genre && (
+              <Badge variant="secondary" size="md">
+                {book.genre}
+              </Badge>
+            )}
+            {book.description && (
+              <p className="text-indigo/70 text-sm max-w-2xl">{book.description}</p>
+            )}
+            <p className="text-xs text-indigo/40">
+              Created {formatDistanceToNow(book.createdAt, { addSuffix: true })} &middot;
+              Updated {formatDistanceToNow(book.updatedAt, { addSuffix: true })}
+            </p>
+          </div>
         </div>
 
         {/* Section cards grid */}

@@ -164,6 +164,7 @@ export interface TimelineEvent {
   id: string;
   bookId: string;
   chapterId: string | null;
+  characterIds: string[];
   title: string;
   description: string;
   eventType: TimelineEventType;
@@ -226,6 +227,44 @@ export const TIMELINE_EVENT_COLORS: Record<TimelineEventType, string> = {
   setting: '#8BAEC4',
   conflict: '#C47070',
   resolution: '#8DB580',
+};
+
+// ── Chapter Illustrations ─────────────────────────────────────────────
+
+export interface Illustration {
+  id: string;
+  chapterId: string;
+  bookId: string;
+  imageId: string;
+  caption: string;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ── Storyboard Connections ─────────────────────────────────────────────
+
+export type StringColor = 'red' | 'blue' | 'green' | 'yellow' | 'white' | 'orange' | 'purple' | 'pink';
+
+export interface Connection {
+  id: string;
+  bookId: string;
+  fromIdeaId: string;
+  toIdeaId: string;
+  color: StringColor;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const STRING_COLORS: Record<StringColor, string> = {
+  red: '#C44040',
+  blue: '#4A7AB8',
+  green: '#5A9A5A',
+  yellow: '#C4A840',
+  white: '#E8E0D8',
+  orange: '#C47A40',
+  purple: '#8A5AAA',
+  pink: '#C46A8A',
 };
 
 // ── Auth & Backup ──────────────────────────────────────────────────────

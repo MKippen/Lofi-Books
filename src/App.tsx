@@ -14,6 +14,7 @@ const ChaptersPage = React.lazy(() => import('./pages/ChaptersPage'))
 const ChapterEditor = React.lazy(() => import('./pages/ChapterEditor'))
 const ReaderPage = React.lazy(() => import('./pages/ReaderPage'))
 const WishlistPage = React.lazy(() => import('./pages/WishlistPage'))
+const SettingsPage = React.lazy(() => import('./pages/SettingsPage'))
 
 function LoadingSpinner() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
         <Suspense fallback={<LoadingSpinner />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/settings" element={<SettingsPage />} />
 
             <Route path="/book/:bookId" element={<AppShell />}>
               <Route index element={<BookDashboard />} />

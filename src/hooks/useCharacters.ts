@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, subscribe, notifyChange } from '@/db/database';
+import { subscribe, notifyChange } from '@/api/notify';
+import {
+  listCharacters, getCharacter as getCharacterApi,
+  createCharacterApi, updateCharacterApi, deleteCharacterApi, reorderCharactersApi,
+} from '@/api/characters';
 import type { Character } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -16,10 +20,7 @@ export function useCharacters(bookId: string | undefined) {
       setLoading(false);
       return;
     }
-    const result = await db.characters
-      .where('bookId')
-      .equals(bookId)
-      .sortBy('sortOrder');
+    const result = await listCharacters(bookId);
     setCharacters(result);
     setLoading(false);
   }, [bookId]);
@@ -43,8 +44,12 @@ export function useCharacter(id: string | undefined) {
       setLoading(false);
       return;
     }
-    const result = await db.characters.get(id);
-    setCharacter(result);
+    try {
+      const result = await getCharacterApi(id);
+      setCharacter(result);
+    } catch {
+      setCharacter(undefined);
+    }
     setLoading(false);
   }, [id]);
 
@@ -64,25 +69,8 @@ export function useCharacter(id: string | undefined) {
 export async function createCharacter(
   data: Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'sortOrder'>,
 ): Promise<string> {
-  const now = new Date();
-  const id = crypto.randomUUID();
-
-  // Determine the next sortOrder for this book
-  const existing = await db.characters
-    .where('bookId')
-    .equals(data.bookId)
-    .sortBy('sortOrder');
-  const maxSortOrder = existing.length > 0
-    ? Math.max(...existing.map((c) => c.sortOrder))
-    : -1;
-
-  await db.characters.add({
-    ...data,
-    id,
-    sortOrder: maxSortOrder + 1,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const { bookId, ...rest } = data;
+  const id = await createCharacterApi(bookId, rest);
   notifyChange();
   return id;
 }
@@ -91,36 +79,19 @@ export async function updateCharacter(
   id: string,
   data: Partial<Omit<Character, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.characters.update(id, {
-    ...data,
-    updatedAt: new Date(),
-  });
+  await updateCharacterApi(id, data);
   notifyChange();
 }
 
 export async function deleteCharacter(id: string): Promise<void> {
-  const character = await db.characters.get(id);
-  if (character) {
-    await db.transaction('rw', [db.characters, db.storedImages], async () => {
-      // Delete any stored images associated with this character
-      if (character.mainImageId) {
-        await db.storedImages.delete(character.mainImageId);
-      }
-      await db.characters.delete(id);
-    });
-  }
+  await deleteCharacterApi(id);
   notifyChange();
 }
 
 export async function reorderCharacters(
-  _bookId: string,
+  bookId: string,
   orderedIds: string[],
 ): Promise<void> {
-  await db.transaction('rw', db.characters, async () => {
-    const updates = orderedIds.map((charId, index) =>
-      db.characters.update(charId, { sortOrder: index }),
-    );
-    await Promise.all(updates);
-  });
+  await reorderCharactersApi(bookId, orderedIds);
   notifyChange();
 }

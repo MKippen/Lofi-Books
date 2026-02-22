@@ -146,23 +146,54 @@ body {
   z-index: 1;
 }
 
-/* ── Cork Board Texture ──────────────────────────────────────────────── */
+/* ── Burlap / Linen Pinboard Texture ─────────────────────────────────── */
 
 .cork-texture {
-  background:
-    repeating-conic-gradient(
-      #c4956a 0% 25%,
-      #d4a574 0% 50%
-    ) 0 0 / 20px 20px,
+  background-color: #8a9a78;
+  background-image:
+    /* Warp threads — vertical fibers */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(60, 75, 50, 0.08) 3px,
+      transparent 4px,
+      transparent 7px,
+      rgba(95, 110, 75, 0.05) 7px,
+      transparent 8px
+    ),
+    /* Weft threads — horizontal fibers */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 4px,
+      rgba(55, 70, 45, 0.07) 4px,
+      transparent 5px,
+      transparent 9px,
+      rgba(85, 100, 68, 0.04) 9px,
+      transparent 10px
+    ),
+    /* Diagonal slub — natural linen irregularity */
+    repeating-linear-gradient(
+      155deg,
+      transparent,
+      transparent 12px,
+      rgba(70, 85, 55, 0.03) 12px,
+      transparent 14px
+    ),
+    /* Soft ambient glow patches */
+    radial-gradient(ellipse 80% 60% at 15% 25%, rgba(120, 140, 95, 0.15) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 70% at 80% 70%, rgba(105, 125, 85, 0.12) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(130, 148, 108, 0.08) 0%, transparent 60%),
+    /* Base — muted sage-olive gradient */
     linear-gradient(
-      135deg,
-      #c4956a 0%,
-      #d4a574 25%,
-      #b8895e 50%,
-      #c9a07a 75%,
-      #c4956a 100%
+      145deg,
+      #7d8e6c 0%,
+      #8a9a78 25%,
+      #92a27e 50%,
+      #889870 75%,
+      #7f9068 100%
     );
-  background-color: #c4956a;
 }
 
 /* ── Custom Scrollbar ────────────────────────────────────────────────── */
@@ -331,6 +362,106 @@ body {
   height: 1px;
   background: linear-gradient(to right, transparent, var(--color-primary), transparent);
   margin: 2rem 0;
+}
+
+/* ── 3D Book Card ───────────────────────────────────────────────────── */
+
+.book-3d {
+  perspective: 800px;
+  width: 150px;
+  height: 210px;
+}
+
+.book-3d-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform: rotateY(-18deg);
+  transition: transform 0.35s ease;
+}
+
+.group:hover .book-3d-inner {
+  transform: rotateY(-8deg);
+}
+
+/* Front cover face */
+.book-cover {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px 6px 6px 2px;
+  overflow: hidden;
+  backface-visibility: hidden;
+  box-shadow:
+    2px 2px 8px rgba(0, 0, 0, 0.2),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+/* Spine (left edge) — 3D rotated */
+.book-spine {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 28px;
+  height: 100%;
+  transform-origin: left center;
+  transform: rotateY(-90deg);
+  border-radius: 3px 0 0 3px;
+  box-shadow: inset -1px 0 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Page edges — visible on the right side */
+.book-pages {
+  position: absolute;
+  top: 3px;
+  right: -8px;
+  width: 8px;
+  height: calc(100% - 6px);
+  transform-origin: left center;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      #F5F0E8,
+      #F5F0E8 1px,
+      #E8E0D2 1px,
+      #E8E0D2 2px
+    );
+  border-radius: 0 2px 2px 0;
+  box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Bottom page thickness */
+.book-bottom {
+  position: absolute;
+  bottom: -6px;
+  left: 4px;
+  right: -4px;
+  height: 6px;
+  background:
+    repeating-linear-gradient(
+      to right,
+      #F5F0E8,
+      #F5F0E8 2px,
+      #E8E0D2 2px,
+      #E8E0D2 3px
+    );
+  border-radius: 0 0 2px 2px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+}
+
+/* Skeleton version */
+.book-3d-skeleton .book-cover {
+  background: linear-gradient(135deg, #E0D8CC, #D4CCC0);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.book-3d-skeleton .book-spine {
+  background: #C4BCA8;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 /* ── Touch Device Helpers ────────────────────────────────────────────── */

@@ -7,16 +7,19 @@ import CharacterCount from '@tiptap/extension-character-count';
 import Underline from '@tiptap/extension-underline';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, StickyNote, Palette } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db } from '@/db/database';
+import { getChapterApi } from '@/api/chapters';
 import { useChapters, createChapter, updateChapter } from '@/hooks/useChapters';
 import { useDebouncedCallback } from '@/hooks/useDebounce';
 import type { Chapter, ChapterStatus } from '@/types';
 import EditorToolbar from './EditorToolbar';
 import ChapterListSidebar from './ChapterListSidebar';
 import ChapterNotesSidebar from './ChapterNotesSidebar';
+import ChapterIllustrationsSidebar from './ChapterIllustrationsSidebar';
 import WordCount from './WordCount';
+
+type RightTab = 'notes' | 'drawings';
 
 const statusOptions: { value: ChapterStatus; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -56,6 +59,7 @@ export default function ChapterEditor() {
   const isSmallScreen = typeof window !== 'undefined' && window.innerWidth < 1024;
   const [leftOpen, setLeftOpen] = useState(!isSmallScreen);
   const [rightOpen, setRightOpen] = useState(!isSmallScreen);
+  const [rightTab, setRightTab] = useState<RightTab>('notes');
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -67,14 +71,16 @@ export default function ChapterEditor() {
       setLoading(false);
       return;
     }
-    db.chapters.get(chapterId).then((result) => {
+    getChapterApi(chapterId).then((result) => {
       if (cancelled) return;
       setChapter(result);
-      if (result) {
-        setTitle(result.title);
-        setNotes(result.notes);
-        setStatus(result.status);
-      }
+      setTitle(result.title);
+      setNotes(result.notes);
+      setStatus(result.status);
+      setLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setChapter(undefined);
       setLoading(false);
     });
     return () => {
@@ -243,7 +249,7 @@ export default function ChapterEditor() {
             type="button"
             onClick={() => setRightOpen((v) => !v)}
             className="p-2 text-indigo/40 hover:text-indigo transition-colors cursor-pointer"
-            title={rightOpen ? 'Hide notes' : 'Show notes'}
+            title={rightOpen ? 'Hide panel' : 'Show panel'}
           >
             {rightOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
           </button>
@@ -335,9 +341,45 @@ export default function ChapterEditor() {
             animate={{ width: 288, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="shrink-0 overflow-hidden"
+            className="shrink-0 overflow-hidden flex flex-col h-full"
           >
-            <ChapterNotesSidebar notes={notes} onChange={handleNotesChange} />
+            {/* Tab switcher */}
+            <div className="flex border-b border-primary/10 bg-surface shrink-0">
+              <button
+                type="button"
+                onClick={() => setRightTab('notes')}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold transition-colors cursor-pointer ${
+                  rightTab === 'notes'
+                    ? 'text-warning border-b-2 border-warning'
+                    : 'text-indigo/40 hover:text-indigo/60'
+                }`}
+              >
+                <StickyNote size={14} />
+                Notes
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightTab('drawings')}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold transition-colors cursor-pointer ${
+                  rightTab === 'drawings'
+                    ? 'text-accent border-b-2 border-accent'
+                    : 'text-indigo/40 hover:text-indigo/60'
+                }`}
+              >
+                <Palette size={14} />
+                Drawings
+              </button>
+            </div>
+            {/* Tab content */}
+            <div className="flex-1 min-h-0">
+              {rightTab === 'notes' ? (
+                <ChapterNotesSidebar notes={notes} onChange={handleNotesChange} />
+              ) : (
+                bookId && chapterId && (
+                  <ChapterIllustrationsSidebar bookId={bookId} chapterId={chapterId} />
+                )
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

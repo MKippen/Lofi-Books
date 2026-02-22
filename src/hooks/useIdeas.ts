@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, subscribe, notifyChange } from '@/db/database';
+import { subscribe, notifyChange } from '@/api/notify';
+import {
+  listIdeas, createIdeaApi, updateIdeaApi, deleteIdeaApi, bringToFrontApi,
+} from '@/api/ideas';
 import type { Idea } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -16,10 +19,7 @@ export function useIdeas(bookId: string | undefined) {
       setLoading(false);
       return;
     }
-    const result = await db.ideas
-      .where('bookId')
-      .equals(bookId)
-      .toArray();
+    const result = await listIdeas(bookId);
     setIdeas(result);
     setLoading(false);
   }, [bookId]);
@@ -41,29 +41,8 @@ export async function createIdea(
   data: Omit<Idea, 'id' | 'createdAt' | 'updatedAt' | 'positionX' | 'positionY' | 'width' | 'height' | 'zIndex'> &
     Partial<Pick<Idea, 'positionX' | 'positionY' | 'width' | 'height' | 'zIndex'>>,
 ): Promise<string> {
-  const now = new Date();
-  const id = crypto.randomUUID();
-
-  // Determine the highest zIndex among ideas in this book
-  const existing = await db.ideas
-    .where('bookId')
-    .equals(data.bookId)
-    .toArray();
-  const maxZ = existing.length > 0
-    ? Math.max(...existing.map((i) => i.zIndex))
-    : 0;
-
-  await db.ideas.add({
-    positionX: 100,
-    positionY: 100,
-    width: 220,
-    height: 180,
-    zIndex: maxZ + 1,
-    ...data,
-    id,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const { bookId, ...rest } = data;
+  const id = await createIdeaApi(bookId, rest);
   notifyChange();
   return id;
 }
@@ -72,30 +51,16 @@ export async function updateIdea(
   id: string,
   data: Partial<Omit<Idea, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.ideas.update(id, {
-    ...data,
-    updatedAt: new Date(),
-  });
+  await updateIdeaApi(id, data);
   notifyChange();
 }
 
 export async function deleteIdea(id: string): Promise<void> {
-  await db.ideas.delete(id);
+  await deleteIdeaApi(id);
   notifyChange();
 }
 
-export async function bringToFront(id: string, bookId: string): Promise<void> {
-  const existing = await db.ideas
-    .where('bookId')
-    .equals(bookId)
-    .toArray();
-  const maxZ = existing.length > 0
-    ? Math.max(...existing.map((i) => i.zIndex))
-    : 0;
-
-  await db.ideas.update(id, {
-    zIndex: maxZ + 1,
-    updatedAt: new Date(),
-  });
+export async function bringToFront(id: string, _bookId: string): Promise<void> {
+  await bringToFrontApi(id);
   notifyChange();
 }

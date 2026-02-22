@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, subscribe, notifyChange } from '@/db/database';
-import type { WishlistItem, WishlistItemStatus } from '@/types';
+import { subscribe, notifyChange } from '@/api/notify';
+import {
+  listWishlistItems, createWishlistItemApi,
+  updateWishlistItemApi, toggleWishlistItemStatusApi, deleteWishlistItemApi,
+} from '@/api/wishlist';
+import type { WishlistItem } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Query Hook
@@ -11,10 +15,7 @@ export function useWishlist() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    const result = await db.wishlistItems
-      .orderBy('createdAt')
-      .reverse()
-      .toArray();
+    const result = await listWishlistItems();
     setItems(result);
     setLoading(false);
   }, []);
@@ -35,16 +36,7 @@ export function useWishlist() {
 export async function createWishlistItem(
   data: Pick<WishlistItem, 'title' | 'description' | 'type'>,
 ): Promise<string> {
-  const now = new Date();
-  const id = crypto.randomUUID();
-
-  await db.wishlistItems.add({
-    ...data,
-    id,
-    status: 'open',
-    createdAt: now,
-    updatedAt: now,
-  });
+  const id = await createWishlistItemApi(data);
   notifyChange();
   return id;
 }
@@ -53,26 +45,16 @@ export async function updateWishlistItem(
   id: string,
   data: Partial<Omit<WishlistItem, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.wishlistItems.update(id, {
-    ...data,
-    updatedAt: new Date(),
-  });
+  await updateWishlistItemApi(id, data);
   notifyChange();
 }
 
 export async function toggleWishlistItemStatus(id: string): Promise<void> {
-  const item = await db.wishlistItems.get(id);
-  if (!item) return;
-
-  const newStatus: WishlistItemStatus = item.status === 'open' ? 'done' : 'open';
-  await db.wishlistItems.update(id, {
-    status: newStatus,
-    updatedAt: new Date(),
-  });
+  await toggleWishlistItemStatusApi(id);
   notifyChange();
 }
 
 export async function deleteWishlistItem(id: string): Promise<void> {
-  await db.wishlistItems.delete(id);
+  await deleteWishlistItemApi(id);
   notifyChange();
 }

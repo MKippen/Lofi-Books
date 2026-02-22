@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createTimelineEvent, updateTimelineEvent } from '@/hooks/useTimeline';
+import { useChapters } from '@/hooks/useChapters';
+import { useCharacters } from '@/hooks/useCharacters';
 import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
 import TextArea from '@/components/ui/TextArea';
@@ -30,11 +32,15 @@ export default function TimelineEventForm({
   bookId,
   event,
 }: TimelineEventFormProps) {
+  const { chapters } = useChapters(bookId);
+  const { characters } = useCharacters(bookId);
   const isEditing = !!event;
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [eventType, setEventType] = useState<TimelineEventType>('plot');
+  const [chapterId, setChapterId] = useState<string | null>(null);
+  const [characterIds, setCharacterIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   // Reset form when modal opens or event changes
@@ -44,13 +50,23 @@ export default function TimelineEventForm({
         setTitle(event.title);
         setDescription(event.description);
         setEventType(event.eventType);
+        setChapterId(event.chapterId);
+        setCharacterIds(event.characterIds || []);
       } else {
         setTitle('');
         setDescription('');
         setEventType('plot');
+        setChapterId(null);
+        setCharacterIds([]);
       }
     }
   }, [isOpen, event]);
+
+  const toggleCharacter = (id: string) => {
+    setCharacterIds((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    );
+  };
 
   const handleSubmit = async () => {
     if (!title.trim()) return;
@@ -62,12 +78,15 @@ export default function TimelineEventForm({
           title: title.trim(),
           description: description.trim(),
           eventType,
+          chapterId,
+          characterIds,
           color: TIMELINE_EVENT_COLORS[eventType],
         });
       } else {
         await createTimelineEvent({
           bookId,
-          chapterId: null,
+          chapterId,
+          characterIds,
           title: title.trim(),
           description: description.trim(),
           eventType,
@@ -143,13 +162,53 @@ export default function TimelineEventForm({
           </div>
         </div>
 
-        {/* Chapter link placeholder */}
+        {/* Chapter dropdown */}
         <div className="flex flex-col gap-1.5">
           <label className="font-semibold text-sm text-indigo/70">Linked Chapter</label>
-          <div className="w-full rounded-xl border-2 border-secondary/20 px-4 py-2.5 bg-surface text-indigo/30 text-sm">
-            None
-          </div>
+          <select
+            value={chapterId || ''}
+            onChange={(e) => setChapterId(e.target.value || null)}
+            className="w-full rounded-xl border-2 border-secondary/20 px-4 py-2.5 bg-surface text-indigo text-sm focus:border-primary focus:outline-none transition-colors"
+          >
+            <option value="">None</option>
+            {chapters.map((ch) => (
+              <option key={ch.id} value={ch.id}>
+                {ch.title}
+              </option>
+            ))}
+          </select>
         </div>
+
+        {/* Character checkboxes */}
+        {characters.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <label className="font-semibold text-sm text-indigo/70">Characters</label>
+            <div className="flex flex-wrap gap-2">
+              {characters.map((char) => {
+                const isSelected = characterIds.includes(char.id);
+                return (
+                  <button
+                    key={char.id}
+                    type="button"
+                    onClick={() => toggleCharacter(char.id)}
+                    className={`
+                      inline-flex items-center gap-1.5 px-3 py-1.5
+                      rounded-full text-sm font-medium
+                      transition-all duration-200 cursor-pointer border-2
+                      ${isSelected
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-secondary/20 bg-surface text-indigo/50 hover:border-secondary/40'
+                      }
+                    `}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-primary' : 'bg-indigo/20'}`} />
+                    {char.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-end gap-3 pt-2">
           <Button variant="ghost" onClick={onClose} disabled={submitting}>

@@ -53,7 +53,7 @@ export default function AppShell() {
       </div>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bookshop-bg min-w-0">
+      <main className="flex-1 overflow-auto bookshop-bg min-w-0 h-screen">
         <Outlet />
       </main>
     </div>
