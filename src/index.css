@@ -377,32 +377,45 @@ body {
   margin: 1rem auto;
 }
 
-/* Reader: illustration cards rendered from <illustration-embed> tags */
+/* CSS column pagination — prevent ugly breaks */
+.reader-content p,
+.reader-content blockquote,
+.reader-content li,
+.reader-content h1,
+.reader-content h2,
+.reader-content h3 {
+  break-inside: avoid;
+}
+
+/* Reader: full-width manga-style illustration panels */
 .reader-content .illustration-reader-card {
-  margin: 1.5rem auto;
-  max-width: 280px;
-  border-radius: 12px;
+  position: relative;
+  margin: 1rem 0;
+  width: 100%;
+  border-radius: 8px;
   overflow: hidden;
-  border: 2px solid var(--color-accent, #C4836A);
-  background: var(--color-surface, #FFFDF8);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  break-inside: avoid;
 }
 
 .reader-content .illustration-reader-card img {
   width: 100%;
-  height: auto;
-  max-height: 260px;
+  height: 100%;
   object-fit: cover;
   display: block;
 }
 
 .reader-content .illustration-caption {
-  padding: 0.5rem 0.75rem;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0.75rem 1rem;
+  padding-top: 2rem;
+  background: linear-gradient(to top, rgba(0,0,0,0.5), transparent);
   text-align: center;
   font-style: italic;
   font-size: 0.875rem;
-  color: var(--color-indigo, #2D3142);
-  opacity: 0.7;
+  color: white;
   margin: 0;
 }
 

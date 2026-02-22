@@ -56,8 +56,8 @@ export default function ChapterIllustrationsSidebar({ bookId, chapterId, editor 
   };
 
   return (
-    <div className="w-56 bg-accent/5 border-l border-accent/20 h-full flex flex-col">
-      <div className="px-3 pt-3 pb-2 flex items-center justify-between">
+    <div className="h-full flex flex-col">
+      <div className="px-4 py-2 flex items-center justify-between">
         <p className="text-xs text-indigo/40">
           Drag into chapter to embed
         </p>
@@ -65,14 +65,14 @@ export default function ChapterIllustrationsSidebar({ bookId, chapterId, editor 
           type="button"
           onClick={handleAddImage}
           disabled={uploading}
-          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-accent hover:bg-accent/10 transition-colors cursor-pointer disabled:opacity-50"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-accent hover:bg-accent/10 transition-colors cursor-pointer disabled:opacity-50"
         >
           <Plus size={14} />
           {uploading ? 'Uploading...' : 'Add'}
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pb-3">
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
         {illustrations.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-indigo/30">
             <Palette size={32} strokeWidth={1} />
@@ -82,7 +82,7 @@ export default function ChapterIllustrationsSidebar({ bookId, chapterId, editor 
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-3">
           {illustrations.map((ill) => {
             const url = imageUrl(ill.imageId);
             return (

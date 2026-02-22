@@ -57,7 +57,7 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
   if (!editor) return null;
 
   return (
-    <div className="flex items-center gap-1 bg-surface border-b border-primary/10 px-2 sm:px-4 py-2 sticky top-0 z-10 overflow-x-auto">
+    <div className="flex items-center gap-1.5 bg-surface px-2 sm:px-3 overflow-x-auto">
       <ToolbarButton
         icon={Bold}
         onClick={() => editor.chain().focus().toggleBold().run()}

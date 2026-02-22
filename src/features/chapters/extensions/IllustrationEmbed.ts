@@ -39,6 +39,20 @@ export const IllustrationEmbed = Node.create({
           'data-caption': attributes.caption,
         }),
       },
+      height: {
+        default: 200,
+        parseHTML: (element) => parseInt(element.getAttribute('data-height') || '200', 10),
+        renderHTML: (attributes) => ({
+          'data-height': String(attributes.height),
+        }),
+      },
+      focalY: {
+        default: 50,
+        parseHTML: (element) => parseInt(element.getAttribute('data-focal-y') || '50', 10),
+        renderHTML: (attributes) => ({
+          'data-focal-y': String(attributes.focalY),
+        }),
+      },
     };
   },
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { ArrowLeft, Users, Wrench, ZoomIn, ZoomOut, Type } from 'lucide-react';
 import { useWritingTools } from '@/components/layout/WritingToolsContext';
@@ -6,10 +6,8 @@ import { getBook } from '@/api/books';
 import { listChapters } from '@/api/chapters';
 import { listCharacters } from '@/api/characters';
 import type { Book, Chapter, Character } from '@/types';
-import { paginateHTML } from '@/utils/textUtils';
 import BookPage from './BookPage';
 import ReaderControls from './ReaderControls';
-import PageFlipAnimation from './PageFlipAnimation';
 
 const FONT_SIZE_KEY = 'reader-font-size';
 const FONT_FAMILY_KEY = 'reader-font-family';
@@ -23,6 +21,7 @@ const FONT_FAMILIES = [
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 28;
 const FONT_SIZE_STEP = 2;
+const COLUMN_GAP = 48;
 
 /** Hook to track whether we have enough width for a two-page spread. */
 function useTwoPageMode(breakpoint = 1024): boolean {
@@ -48,9 +47,9 @@ export default function ReaderPage() {
   const [loading, setLoading] = useState(true);
 
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
-  const [currentPage, setCurrentPage] = useState(0);
+  const [spreadIndex, setSpreadIndex] = useState(0);
+  const [totalSpreads, setTotalSpreads] = useState(1);
   const [showCharacterPortraits, setShowCharacterPortraits] = useState(false);
-  const [direction, setDirection] = useState<1 | -1>(1);
   const [showFontPicker, setShowFontPicker] = useState(false);
 
   // Reader customization — persisted to localStorage
@@ -97,59 +96,48 @@ export default function ReaderPage() {
     load();
   }, [bookId]);
 
-  // Paginate the current chapter content
-  const pages = useMemo(() => {
-    if (chapters.length === 0) return [''];
-    const chapter = chapters[currentChapterIndex];
-    if (!chapter) return [''];
-    return paginateHTML(chapter.content);
-  }, [chapters, currentChapterIndex]);
-
-  // Reset page to 0 when chapter changes
+  // Reset spread to 0 when chapter changes
   useEffect(() => {
-    setCurrentPage(0);
+    setSpreadIndex(0);
+    setTotalSpreads(1);
   }, [currentChapterIndex]);
 
-  // In two-page mode, snap currentPage to even numbers
+  // Reset spread when font/layout changes
   useEffect(() => {
-    if (twoPage && currentPage % 2 !== 0) {
-      setCurrentPage((p) => Math.max(0, p - 1));
-    }
-  }, [twoPage, currentPage]);
+    setSpreadIndex(0);
+  }, [fontSize, fontFamily, twoPage]);
 
   const currentChapter = chapters[currentChapterIndex] ?? null;
-  const step = twoPage ? 2 : 1;
+  const columnCount = twoPage ? 2 : 1;
 
   // Can we navigate backward?
-  const canGoPrev = currentPage > 0 || currentChapterIndex > 0;
+  const canGoPrev = spreadIndex > 0 || currentChapterIndex > 0;
   // Can we navigate forward?
-  const canGoNext = (twoPage ? currentPage + 1 : currentPage) < pages.length - 1 || currentChapterIndex < chapters.length - 1;
+  const canGoNext = spreadIndex < totalSpreads - 1 || currentChapterIndex < chapters.length - 1;
 
   const goNext = useCallback(() => {
-    setDirection(1);
-    const lastVisible = twoPage ? currentPage + 1 : currentPage;
-    if (lastVisible < pages.length - 1) {
-      setCurrentPage((p) => Math.min(p + step, pages.length - 1));
+    if (spreadIndex < totalSpreads - 1) {
+      setSpreadIndex((s) => s + 1);
     } else if (currentChapterIndex < chapters.length - 1) {
       setCurrentChapterIndex((i) => i + 1);
     }
-  }, [currentPage, pages.length, currentChapterIndex, chapters.length, step, twoPage]);
+  }, [spreadIndex, totalSpreads, currentChapterIndex, chapters.length]);
 
   const goPrev = useCallback(() => {
-    setDirection(-1);
-    if (currentPage > 0) {
-      setCurrentPage((p) => Math.max(0, p - step));
+    if (spreadIndex > 0) {
+      setSpreadIndex((s) => s - 1);
     } else if (currentChapterIndex > 0) {
-      const prevChapter = chapters[currentChapterIndex - 1];
-      const prevPages = paginateHTML(prevChapter.content);
+      // Go to previous chapter — set to large number, will be clamped by onTotalSpreadsChange
       setCurrentChapterIndex((i) => i - 1);
-      setTimeout(() => {
-        // In two-page mode, snap to even page
-        const lastPage = prevPages.length - 1;
-        setCurrentPage(twoPage ? (lastPage % 2 === 0 ? lastPage : Math.max(0, lastPage - 1)) : lastPage);
-      }, 0);
+      setSpreadIndex(999);
     }
-  }, [currentPage, currentChapterIndex, chapters, step, twoPage]);
+  }, [spreadIndex, currentChapterIndex]);
+
+  const handleTotalSpreadsChange = useCallback((total: number) => {
+    setTotalSpreads(total);
+    // If spreadIndex is out of bounds (e.g. 999 from goPrev), clamp it
+    setSpreadIndex((prev) => Math.min(prev, Math.max(0, total - 1)));
+  }, []);
 
   // Keyboard navigation + zoom shortcuts
   useEffect(() => {
@@ -173,19 +161,34 @@ export default function ReaderPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [goNext, goPrev, zoomIn, zoomOut]);
 
+  // Scroll wheel navigation — debounced so one flick = one page turn
+  useEffect(() => {
+    let cooldown = false;
+    function handleWheel(e: WheelEvent) {
+      // Don't hijack pinch-to-zoom (ctrlKey) or small trackpad jitter
+      if (e.ctrlKey || Math.abs(e.deltaY) < 10) return;
+      e.preventDefault();
+      if (cooldown) return;
+      cooldown = true;
+      if (e.deltaY > 0) goNext();
+      else goPrev();
+      setTimeout(() => { cooldown = false; }, 400);
+    }
+
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    return () => window.removeEventListener('wheel', handleWheel);
+  }, [goNext, goPrev]);
+
   // Close font picker on outside click
   useEffect(() => {
     if (!showFontPicker) return;
     const handleClick = () => setShowFontPicker(false);
-    // Delay to avoid closing immediately from the button click
     const timer = setTimeout(() => document.addEventListener('click', handleClick), 0);
     return () => { clearTimeout(timer); document.removeEventListener('click', handleClick); };
   }, [showFontPicker]);
 
   const handleChapterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const idx = Number(e.target.value);
-    setDirection(idx > currentChapterIndex ? 1 : -1);
-    setCurrentChapterIndex(idx);
+    setCurrentChapterIndex(Number(e.target.value));
   };
 
   if (loading) {
@@ -220,11 +223,6 @@ export default function ReaderPage() {
     );
   }
 
-  const isFirstPageOfChapter = currentPage === 0;
-  const leftPageIndex = currentPage;
-  const rightPageIndex = currentPage + 1;
-  const hasRightPage = rightPageIndex < pages.length;
-
   // Build chapter context for Hanako ghost popover
   const readerChapterContext = currentChapter ? {
     chapterId: currentChapter.id,
@@ -234,9 +232,11 @@ export default function ReaderPage() {
   } : null;
 
   // Page display for the top bar
-  const displayPage = twoPage
-    ? (hasRightPage ? `${leftPageIndex + 1}-${rightPageIndex + 1}` : `${leftPageIndex + 1}`)
-    : `${currentPage + 1}`;
+  const pageStart = spreadIndex * columnCount + 1;
+  const pageEnd = Math.min(pageStart + columnCount - 1, totalSpreads * columnCount);
+  const displayPage = columnCount > 1 && pageStart !== pageEnd
+    ? `${pageStart}–${pageEnd}`
+    : `${pageStart}`;
 
   return (
     <div className="h-screen bg-cream flex flex-col overflow-hidden">
@@ -272,7 +272,7 @@ export default function ReaderPage() {
           </div>
 
           {/* Right: Controls */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {/* Zoom out */}
             <button
               type="button"
@@ -369,78 +369,21 @@ export default function ReaderPage() {
 
       {/* Main Content Area — fills remaining viewport exactly */}
       <div className="flex-1 min-h-0 px-6 py-4">
-        {twoPage ? (
-          /* ── Two-page book spread ── */
-          <div className="h-full max-w-[95vw] mx-auto">
-            <PageFlipAnimation
-              pageKey={`${currentChapterIndex}-${currentPage}`}
-              direction={direction}
-            >
-              <div className="flex book-spread h-full">
-                {/* Left page */}
-                <div className="flex-1 min-w-0 book-page-left h-full">
-                  <BookPage
-                    content={pages[leftPageIndex] || ''}
-                    chapterTitle={isFirstPageOfChapter ? (currentChapter?.title ?? null) : null}
-                    pageNumber={leftPageIndex}
-                    showCharacterPortraits={showCharacterPortraits}
-                    characters={characters}
-                    chapterContext={readerChapterContext}
-                    fontSize={fontSize}
-                    fontCss={fontConfig.css}
-                  />
-                </div>
-
-                {/* Book spine */}
-                <div className="w-px relative shrink-0">
-                  <div className="absolute inset-0 w-8 -translate-x-1/2 bg-gradient-to-r from-transparent via-indigo/[0.06] to-transparent pointer-events-none" />
-                </div>
-
-                {/* Right page */}
-                <div className="flex-1 min-w-0 book-page-right h-full">
-                  {hasRightPage ? (
-                    <BookPage
-                      content={pages[rightPageIndex] || ''}
-                      chapterTitle={null}
-                      pageNumber={rightPageIndex}
-                      showCharacterPortraits={showCharacterPortraits}
-                      characters={characters}
-                      chapterContext={readerChapterContext}
-                      fontSize={fontSize}
-                      fontCss={fontConfig.css}
-                    />
-                  ) : (
-                    /* Empty right page — end of chapter */
-                    <div className="bg-surface px-12 py-10 h-full shadow-lg rounded-r-lg border border-primary/5 flex items-center justify-center">
-                      <div className="text-center text-indigo/20">
-                        <p className="text-sm italic font-body">End of chapter</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </PageFlipAnimation>
-          </div>
-        ) : (
-          /* ── Single-page view ── */
-          <div className="h-full max-w-2xl mx-auto">
-            <PageFlipAnimation
-              pageKey={`${currentChapterIndex}-${currentPage}`}
-              direction={direction}
-            >
-              <BookPage
-                content={pages[currentPage] || ''}
-                chapterTitle={isFirstPageOfChapter ? (currentChapter?.title ?? null) : null}
-                pageNumber={currentPage}
-                showCharacterPortraits={showCharacterPortraits}
-                characters={characters}
-                chapterContext={readerChapterContext}
-                fontSize={fontSize}
-                fontCss={fontConfig.css}
-              />
-            </PageFlipAnimation>
-          </div>
-        )}
+        <div className="h-full max-w-[95vw] mx-auto">
+          <BookPage
+            content={currentChapter?.content || ''}
+            chapterTitle={currentChapter?.title ?? null}
+            showCharacterPortraits={showCharacterPortraits}
+            characters={characters}
+            chapterContext={readerChapterContext}
+            fontSize={fontSize}
+            fontCss={fontConfig.css}
+            columnCount={columnCount}
+            columnGap={COLUMN_GAP}
+            spreadIndex={spreadIndex}
+            onTotalSpreadsChange={handleTotalSpreadsChange}
+          />
+        </div>
       </div>
 
       {/* Bottom Controls */}
@@ -449,10 +392,10 @@ export default function ReaderPage() {
         onNext={goNext}
         canGoPrev={canGoPrev}
         canGoNext={canGoNext}
-        currentPage={currentPage}
-        totalPages={pages.length}
+        currentPage={spreadIndex}
+        totalPages={totalSpreads}
         chapterTitle={currentChapter?.title ?? ''}
-        step={step}
+        step={1}
       />
     </div>
   );

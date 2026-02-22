@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { motion } from 'framer-motion';
 import {
@@ -12,6 +12,7 @@ import {
   TrendingUp,
   User,
   Wrench,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useWritingTools } from '@/components/layout/WritingToolsContext';
 import { useCharacter, deleteCharacter } from '@/hooks/useCharacters';
@@ -45,6 +46,18 @@ export default function CharacterFullPage() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
 
   const handleDelete = async () => {
     if (!characterId) return;
@@ -87,7 +100,7 @@ export default function CharacterFullPage() {
   return (
     <div className="min-h-screen bg-cream">
       {/* Top navigation */}
-      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-primary/10 bg-cream/80 backdrop-blur-sm px-8 py-4">
+      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-primary/10 bg-cream/80 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3">
         <button
           onClick={() => navigate(`/book/${bookId}/characters`)}
           className="inline-flex items-center gap-2 text-indigo/60 hover:text-primary transition-colors cursor-pointer font-semibold text-sm"
@@ -100,14 +113,35 @@ export default function CharacterFullPage() {
             <Edit2 size={16} />
             Edit
           </Button>
-          <Button variant="danger" size="sm" onClick={() => setDeleteOpen(true)}>
-            <Trash2 size={16} />
-            Delete
-          </Button>
+
+          {/* More menu (contains Delete) */}
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="flex items-center justify-center w-9 h-9 rounded-lg text-indigo/30 hover:text-indigo hover:bg-primary/10 transition-colors cursor-pointer"
+              title="More options"
+            >
+              <MoreHorizontal size={16} />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full mt-1 bg-surface border border-primary/15 rounded-xl shadow-xl py-1 z-50 min-w-[140px]">
+                <button
+                  type="button"
+                  onClick={() => { setMenuOpen(false); setDeleteOpen(true); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                >
+                  <Trash2 size={14} />
+                  Delete Character
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={() => openWritingTools()}
-            className="p-1.5 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer group"
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer group"
             title="Writing Tools"
           >
             <Wrench size={16} className="group-hover:rotate-[-15deg] transition-transform duration-200" />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   Users,
@@ -8,6 +8,7 @@ import {
   BookOpen,
   Pencil,
   Trash2,
+  MoreHorizontal,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useBook, deleteBook } from '@/hooks/useProjects';
@@ -59,6 +60,20 @@ export default function BookDashboard() {
   const { url: coverUrl } = useImage(book?.coverImageId);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
 
   const totalWordCount = chapters.reduce((sum, ch) => sum + ch.wordCount, 0);
 
@@ -129,10 +144,30 @@ export default function BookDashboard() {
           <Pencil size={16} />
           Edit
         </Button>
-        <Button variant="danger" size="sm" onClick={() => setShowDeleteConfirm(true)}>
-          <Trash2 size={16} />
-          Delete
-        </Button>
+
+        {/* More menu (contains Delete) */}
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-indigo/30 hover:text-indigo hover:bg-primary/10 transition-colors cursor-pointer"
+            title="More options"
+          >
+            <MoreHorizontal size={16} />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-1 bg-surface border border-primary/15 rounded-xl shadow-xl py-1 z-50 min-w-[140px]">
+              <button
+                type="button"
+                onClick={() => { setMenuOpen(false); setShowDeleteConfirm(true); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+              >
+                <Trash2 size={14} />
+                Delete Book
+              </button>
+            </div>
+          )}
+        </div>
       </TopBar>
 
       <div className="flex-1 p-8">

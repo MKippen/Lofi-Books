@@ -2,9 +2,32 @@
 
 ## UI / Layout Rules
 
-- **Alignment is critical.** Content should be centered within its container — never left-hanging when there's available space. Always use `mx-auto` (or equivalent centering) on constrained-width containers (`max-w-*`).
-- **Spacing and padding must be even and consistent.** Matching elements (cards, panels, sections) should have identical padding, gaps, and margins. Avoid asymmetric spacing unless there's a clear design reason.
+- **Alignment is CRITICAL.** The owner is extremely detail-oriented about alignment. Elements that sit side-by-side MUST share the same height, padding, and vertical rhythm. If a toolbar row is next to a tab bar, they MUST produce identical heights. **Never eyeball it — verify the math.**
+- Content should be centered within its container — never left-hanging when there's available space. Always use `mx-auto` (or equivalent centering) on constrained-width containers (`max-w-*`).
 - When in doubt, center it.
+
+## Spacing & Padding Standards
+
+These are the **mandatory** spacing tokens for the project. Do NOT deviate without a clear reason.
+
+| Context | Padding | Gap | Notes |
+|---------|---------|-----|-------|
+| **Page-level wrappers** | `p-6` or `p-8` | — | Outer page content area |
+| **Cards / panels** | `p-4` or `p-6` | — | Inner card padding |
+| **TopBar / toolbar rows** | `px-4 sm:px-6 lg:px-8`, `py-3` | `gap-3` | All page headers, editor toolbars |
+| **Sidebar section headers** | `px-4 py-2` | — | Notes, drawings, panel section titles |
+| **Tab bars** | `py-3` per tab button | `gap-1.5` (icon-text) | Must match adjacent toolbar height |
+| **Inline icon buttons** | `w-9 h-9` with flexbox centering | — | 36px touch target, no raw `p-2` |
+| **Compact button gaps** | — | `gap-1.5` to `gap-2` | Toolbar buttons, control clusters |
+| **Relaxed element gaps** | — | `gap-3` | TopBar children, card grids |
+| **Grid gaps (cards)** | — | `gap-3` | Navigation cards, illustration grids |
+
+**Rules:**
+- **Borders** are always `border border-primary/10` (1px, 10% opacity). Never `border-2` except on focus rings.
+- **Border radius**: `rounded-lg` (8px) for buttons/inputs, `rounded-2xl` (16px) for cards/modals/panels.
+- **Adjacent elements MUST align.** If a toolbar and a tab bar sit on the same horizontal line, they must produce the same total height. Calculate: padding-top + content-height + padding-bottom for both and ensure they match.
+- **Symmetric padding only.** Never use `pl-14 pr-4` or `pt-3 pb-0`. If a direction needs different padding, there must be an explicit reason (e.g. accommodating a fixed sidebar width).
+- **Consistent icon sizes** within the same bar: 16px for compact toolbars, 18px for editor toolbar buttons.
 
 ## Button Variant Rules
 

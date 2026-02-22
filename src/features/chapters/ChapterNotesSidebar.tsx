@@ -5,10 +5,10 @@ interface ChapterNotesSidebarProps {
 
 export default function ChapterNotesSidebar({ notes, onChange }: ChapterNotesSidebarProps) {
   return (
-    <div className="w-72 bg-warning/5 border-l border-warning/20 h-full flex flex-col">
-      <div className="px-3 pt-2 pb-0">
+    <div className="h-full flex flex-col">
+      <div className="px-4 py-2">
         <p className="text-xs text-indigo/40">
-          Private notes &ndash; won't appear in your book
+          Private notes &ndash; won&apos;t appear in your book
         </p>
       </div>
 
@@ -32,7 +32,7 @@ export default function ChapterNotesSidebar({ notes, onChange }: ChapterNotesSid
         }}
         placeholder="Write your notes, ideas, and reminders here..."
         className="
-          flex-1 w-full px-4 py-3
+          flex-1 w-full px-4 py-2
           bg-transparent border-none resize-none
           focus:outline-none
           font-[Caveat] text-indigo/70 text-base leading-relaxed

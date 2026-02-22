@@ -275,18 +275,18 @@ export default function ChapterEditor() {
 
       {/* Center panel */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
-        {/* Toolbar row */}
-        <div className="flex items-center border-b border-primary/10 bg-surface">
+        {/* Toolbar row — h-11 matches left sidebar header and right sidebar tab bar */}
+        <div className="flex items-center h-11 border-b border-primary/10 bg-surface shrink-0">
           <button
             type="button"
             onClick={() => setLeftOpen((v) => !v)}
-            className="p-2 text-indigo/40 hover:text-indigo transition-colors cursor-pointer"
+            className="flex items-center justify-center w-9 h-9 mx-0.5 text-indigo/40 hover:text-indigo hover:bg-primary/5 rounded-lg transition-colors cursor-pointer"
             title={leftOpen ? 'Hide chapters' : 'Show chapters'}
           >
-            {leftOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+            {leftOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
           </button>
 
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <EditorToolbar editor={editor} />
           </div>
 
@@ -298,7 +298,7 @@ export default function ChapterEditor() {
               content: editor?.getHTML() || '',
               wordCount: editor?.storage.characterCount.words() || 0,
             })}
-            className="p-2 text-indigo/30 hover:text-primary transition-colors cursor-pointer group"
+            className="flex items-center justify-center w-9 h-9 mx-0.5 text-indigo/30 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors cursor-pointer group"
             title="Writing Tools"
           >
             <Wrench size={16} className="group-hover:rotate-[-15deg] transition-transform duration-200" />
@@ -307,10 +307,10 @@ export default function ChapterEditor() {
           <button
             type="button"
             onClick={() => setRightOpen((v) => !v)}
-            className="p-2 text-indigo/40 hover:text-indigo transition-colors cursor-pointer"
+            className="flex items-center justify-center w-9 h-9 mx-0.5 text-indigo/40 hover:text-indigo hover:bg-primary/5 rounded-lg transition-colors cursor-pointer"
             title={rightOpen ? 'Hide panel' : 'Show panel'}
           >
-            {rightOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+            {rightOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
           </button>
         </div>
 
@@ -400,14 +400,14 @@ export default function ChapterEditor() {
             animate={{ width: 288, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="shrink-0 overflow-hidden flex flex-col h-full"
+            className="shrink-0 overflow-hidden flex flex-col h-full border-l border-primary/10 bg-cream"
           >
-            {/* Tab switcher */}
-            <div className="flex border-b border-primary/10 bg-surface shrink-0">
+            {/* Tab switcher — h-11 matches toolbar row and left sidebar header */}
+            <div className="flex items-center h-11 border-b border-primary/10 bg-cream shrink-0">
               <button
                 type="button"
                 onClick={() => setRightTab('notes')}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold transition-colors cursor-pointer ${
+                className={`flex-1 h-full flex items-center justify-center gap-1.5 px-3 text-xs font-semibold transition-colors cursor-pointer ${
                   rightTab === 'notes'
                     ? 'text-warning border-b-2 border-warning'
                     : 'text-indigo/40 hover:text-indigo/60'
@@ -419,7 +419,7 @@ export default function ChapterEditor() {
               <button
                 type="button"
                 onClick={() => setRightTab('drawings')}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold transition-colors cursor-pointer ${
+                className={`flex-1 h-full flex items-center justify-center gap-1.5 px-3 text-xs font-semibold transition-colors cursor-pointer ${
                   rightTab === 'drawings'
                     ? 'text-accent border-b-2 border-accent'
                     : 'text-indigo/40 hover:text-indigo/60'

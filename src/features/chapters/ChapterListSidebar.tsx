@@ -25,9 +25,10 @@ export default function ChapterListSidebar({
   const navigate = useNavigate();
 
   return (
-    <div className="w-64 bg-indigo/5 border-r border-primary/10 h-full overflow-y-auto flex flex-col">
-      <div className="px-4 pt-4 pb-2">
-        <span className="font-heading text-sm text-indigo/50 uppercase tracking-wider">
+    <div className="w-64 bg-indigo/5 border-r border-primary/10 h-full flex flex-col">
+      {/* Header row — h-11 matches the editor toolbar and right sidebar tab bar */}
+      <div className="flex items-center h-11 px-4 border-b border-primary/10 shrink-0">
+        <span className="font-heading text-xs text-indigo/50 uppercase tracking-wider">
           Chapters
         </span>
       </div>
