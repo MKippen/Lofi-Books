@@ -12,6 +12,7 @@ export default function PageFlipAnimation({ children, pageKey, direction }: Page
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
         key={pageKey}
+        className="h-full"
         initial={{ opacity: 0, x: direction * 80, scale: 0.98 }}
         animate={{ opacity: 1, x: 0, scale: 1 }}
         exit={{ opacity: 0, x: direction * -80, scale: 0.98 }}

@@ -71,6 +71,7 @@ export default function Modal({
               bg-surface rounded-2xl shadow-2xl
               border-2 border-primary/20
               p-6
+              max-h-[calc(100vh-2rem)] overflow-y-auto
             `}
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}

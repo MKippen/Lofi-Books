@@ -5,10 +5,11 @@ import { toCamelArray, camelToSnake } from '../util.js';
 
 export const wishlistRouter = Router();
 
-// List wishlist items for the current user
-wishlistRouter.get('/', (req, res) => {
-  const userId = (req as any).userId as string;
-  const items = db.prepare('SELECT * FROM wishlist_items WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+const ALLOWED_FIELDS = new Set(['title', 'description', 'type', 'status']);
+
+// List ALL wishlist items (shared across all users)
+wishlistRouter.get('/', (_req, res) => {
+  const items = db.prepare('SELECT * FROM wishlist_items ORDER BY created_at DESC').all();
   res.json(toCamelArray(items as Record<string, unknown>[]));
 });
 
@@ -17,12 +18,12 @@ wishlistRouter.post('/', (req, res) => {
   const userId = (req as any).userId as string;
   const id = uuid();
   const now = new Date().toISOString();
-  const { title, description = '', type = 'idea' } = req.body;
+  const { title, description = '', type = 'idea', createdByName = '' } = req.body;
 
   db.prepare(`
-    INSERT INTO wishlist_items (id, title, description, type, status, user_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'open', ?, ?, ?)
-  `).run(id, title, description, type, userId, now, now);
+    INSERT INTO wishlist_items (id, title, description, type, status, user_id, created_by_name, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?)
+  `).run(id, title, description, type, userId, createdByName, now, now);
 
   res.status(201).json({ id });
 });
@@ -38,7 +39,7 @@ wishlistRouter.put('/:id', (req, res) => {
   const values: unknown[] = [];
 
   for (const [key, value] of Object.entries(req.body)) {
-    if (key === 'userId') continue;
+    if (!ALLOWED_FIELDS.has(key)) continue;
     const col = camelToSnake(key);
     fields.push(`${col} = ?`);
     values.push(value);
@@ -51,11 +52,10 @@ wishlistRouter.put('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// Toggle status
+// Toggle status (any user can toggle — shared wishlist)
 wishlistRouter.put('/:id/toggle', (req, res) => {
-  const userId = (req as any).userId as string;
   const now = new Date().toISOString();
-  const item = db.prepare('SELECT * FROM wishlist_items WHERE id = ? AND user_id = ?').get(req.params.id, userId) as Record<string, unknown> | undefined;
+  const item = db.prepare('SELECT * FROM wishlist_items WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
   if (!item) return res.status(404).json({ error: 'Wishlist item not found' });
 
   const newStatus = item.status === 'open' ? 'done' : 'open';

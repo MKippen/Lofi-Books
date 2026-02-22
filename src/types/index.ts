@@ -128,7 +128,7 @@ export const ABILITY_TYPE_CATEGORIES: AbilityTypeCategory[] = [
   },
 ];
 
-export type IdeaType = 'note' | 'image' | 'chapter-idea';
+export type IdeaType = 'note' | 'image' | 'chapter-idea' | 'sticker';
 
 export type IdeaColor =
   | 'galaxy-purple'
@@ -297,6 +297,8 @@ export interface WishlistItem {
   description: string;
   type: WishlistItemType;
   status: WishlistItemStatus;
+  userId: string;
+  createdByName: string;
   createdAt: Date;
   updatedAt: Date;
 }

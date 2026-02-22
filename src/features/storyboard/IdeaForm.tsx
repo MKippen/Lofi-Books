@@ -24,12 +24,14 @@ const TYPE_LABELS: Record<IdeaType, { create: string; edit: string }> = {
   note: { create: 'New Sticky Note', edit: 'Edit Sticky Note' },
   image: { create: 'New Photo', edit: 'Edit Photo' },
   'chapter-idea': { create: 'New Chapter Idea', edit: 'Edit Chapter Idea' },
+  sticker: { create: 'New Sticker', edit: 'Edit Sticker' },
 };
 
 const DEFAULT_DIMENSIONS: Record<IdeaType, { width: number; height: number }> = {
   note: { width: 200, height: 180 },
   image: { width: 220, height: 260 },
   'chapter-idea': { width: 240, height: 160 },
+  sticker: { width: 80, height: 80 },
 };
 
 export default function IdeaForm({ isOpen, onClose, bookId, ideaType, idea }: IdeaFormProps) {
@@ -41,6 +43,7 @@ export default function IdeaForm({ isOpen, onClose, bookId, ideaType, idea }: Id
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   // Load existing image URL when editing a photo idea
   const { url: existingImageUrl } = useImage(idea?.imageId);
@@ -48,6 +51,7 @@ export default function IdeaForm({ isOpen, onClose, bookId, ideaType, idea }: Id
   // Reset form when modal opens or idea changes
   useEffect(() => {
     if (isOpen) {
+      setSaveError('');
       if (idea) {
         setTitle(idea.title);
         setDescription(idea.description);
@@ -82,6 +86,7 @@ export default function IdeaForm({ isOpen, onClose, bookId, ideaType, idea }: Id
   const handleSubmit = async () => {
     if (!title.trim()) return;
     setSubmitting(true);
+    setSaveError('');
 
     try {
       if (isEditing && idea) {
@@ -128,6 +133,7 @@ export default function IdeaForm({ isOpen, onClose, bookId, ideaType, idea }: Id
       handleClose();
     } catch (error) {
       console.error('Failed to save idea:', error);
+      setSaveError(error instanceof Error ? error.message : 'Failed to save. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -230,6 +236,10 @@ export default function IdeaForm({ isOpen, onClose, bookId, ideaType, idea }: Id
               </div>
             </div>
           </div>
+        )}
+
+        {saveError && (
+          <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{saveError}</p>
         )}
 
         {/* Actions */}

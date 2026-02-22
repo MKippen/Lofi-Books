@@ -32,5 +32,9 @@ export async function uploadImage(bookId: string, file: File): Promise<string> {
 /** Delete an image by ID. */
 export async function deleteImageApi(id: string): Promise<void> {
   const url = apiUrl(`/images/${id}`);
-  await fetch(url, { method: 'DELETE', headers: { 'X-User-Id': getUserId() } });
+  const response = await fetch(url, { method: 'DELETE', headers: { 'X-User-Id': getUserId() } });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Delete failed ${response.status}: ${text}`);
+  }
 }

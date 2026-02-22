@@ -1,6 +1,31 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import type { Character } from '@/types';
+import type { ChapterContext } from '@/components/layout/WritingToolsContext';
 import { useImage } from '@/hooks/useImageStore';
+import HanakoGhostPopover from '@/features/hanako/HanakoGhostPopover';
+
+const IMG_BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api';
+
+/**
+ * Replace <illustration-embed> custom elements with styled illustration cards
+ * for the reader view. These are embedded by the chapter editor.
+ */
+function renderIllustrations(html: string): string {
+  return html.replace(
+    /<illustration-embed[^>]*?data-image-id="([^"]*)"[^>]*?data-caption="([^"]*)"[^>]*?>(?:<\/illustration-embed>)?/g,
+    (_match, imageId: string, caption: string) => {
+      const decodedCaption = caption
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"');
+      return `<div class="illustration-reader-card">
+        <img src="${IMG_BASE}/images/${imageId}" alt="${decodedCaption}" />
+        ${decodedCaption ? `<p class="illustration-caption">${decodedCaption}</p>` : ''}
+      </div>`;
+    },
+  );
+}
 
 interface BookPageProps {
   content: string;
@@ -8,6 +33,9 @@ interface BookPageProps {
   pageNumber: number;
   showCharacterPortraits: boolean;
   characters: Character[];
+  chapterContext?: ChapterContext | null;
+  fontSize?: number;
+  fontCss?: string;
 }
 
 /** Small portrait circle for a single character. */
@@ -42,7 +70,12 @@ export default function BookPage({
   pageNumber,
   showCharacterPortraits,
   characters,
+  chapterContext,
+  fontSize = 18,
+  fontCss,
 }: BookPageProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+
   // Find which characters are mentioned in this page's text
   const mentionedCharacters = useMemo(() => {
     if (!showCharacterPortraits || characters.length === 0) return [];
@@ -52,12 +85,12 @@ export default function BookPage({
   }, [content, characters, showCharacterPortraits]);
 
   return (
-    <div className="bg-surface px-12 py-10 min-h-[70vh] shadow-lg rounded-lg border border-primary/5 relative">
+    <div className="bg-surface px-8 py-6 h-full shadow-lg rounded-lg border border-primary/5 relative flex flex-col overflow-hidden">
       {/* Chapter title header on first page */}
       {chapterTitle && (
-        <div className="mb-8">
+        <div className="mb-4 shrink-0">
           {/* Top decorative line */}
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3 mb-3">
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
             <div className="w-2 h-2 rotate-45 bg-primary/60" />
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
@@ -68,7 +101,7 @@ export default function BookPage({
           </h2>
 
           {/* Bottom decorative line */}
-          <div className="flex items-center gap-3 mt-4">
+          <div className="flex items-center gap-3 mt-3">
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
             <div className="w-2 h-2 rotate-45 bg-primary/60" />
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
@@ -78,23 +111,31 @@ export default function BookPage({
 
       {/* Character portraits row */}
       {mentionedCharacters.length > 0 && (
-        <div className="flex items-start gap-3 mb-6 pb-4 border-b border-primary/5">
+        <div className="flex items-start gap-3 mb-4 pb-3 border-b border-primary/5 shrink-0">
           {mentionedCharacters.map((character) => (
             <CharacterPortrait key={character.id} character={character} />
           ))}
         </div>
       )}
 
-      {/* Rendered HTML content */}
+      {/* Rendered HTML content (with illustration embeds resolved) */}
       <div
-        className="font-reader text-indigo leading-relaxed text-lg reader-content"
-        dangerouslySetInnerHTML={{ __html: content }}
+        ref={contentRef}
+        className="flex-1 min-h-0 overflow-hidden text-indigo leading-relaxed reader-content"
+        style={{ fontSize: `${fontSize}px`, fontFamily: fontCss }}
+        dangerouslySetInnerHTML={{ __html: renderIllustrations(content) }}
       />
 
       {/* Page number at bottom center */}
-      <div className="text-center mt-8">
+      <div className="text-center mt-2 shrink-0">
         <span className="text-xs text-indigo/30">{pageNumber + 1}</span>
       </div>
+
+      {/* Hanako ghost popover for text selection */}
+      <HanakoGhostPopover
+        containerRef={contentRef}
+        chapterContext={chapterContext ?? null}
+      />
     </div>
   );
 }

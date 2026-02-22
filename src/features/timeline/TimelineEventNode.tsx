@@ -7,7 +7,10 @@ import type { TimelineEvent, TimelineEventType } from '@/types';
 interface TimelineEventNodeProps {
   event: TimelineEvent;
   index: number;
+  col: number;
   offsetX: number;
+  offsetY: number;
+  rowHeight: number;
   onEdit: (event: TimelineEvent) => void;
   onDelete: (id: string) => void;
   onDragStart: (eventId: string, pointerX: number, pointerY: number) => void;
@@ -24,15 +27,18 @@ const badgeVariantMap: Record<TimelineEventType, 'primary' | 'secondary' | 'acce
 
 export default function TimelineEventNode({
   event,
-  index,
+  col,
   offsetX,
+  offsetY,
+  rowHeight,
   onEdit,
   onDelete,
   onDragStart,
   isDragging,
 }: TimelineEventNodeProps) {
   const [hovered, setHovered] = useState(false);
-  const isAbove = index % 2 === 0;
+  // Alternate above/below based on column position within the row
+  const isAbove = col % 2 === 0;
 
   const cardY = isAbove ? 'bottom-[calc(50%+20px)]' : 'top-[calc(50%+20px)]';
   const connectorY = isAbove ? 'bottom-[calc(50%+2px)]' : 'top-[calc(50%+2px)]';
@@ -42,8 +48,8 @@ export default function TimelineEventNode({
       className="absolute"
       style={{
         left: `${offsetX}px`,
-        top: 0,
-        bottom: 0,
+        top: `${offsetY}px`,
+        height: `${rowHeight}px`,
         width: '180px',
         opacity: isDragging ? 0.3 : 1,
       }}

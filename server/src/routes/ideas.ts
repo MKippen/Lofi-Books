@@ -4,16 +4,34 @@ import { camelToSnake } from '../util.js';
 
 export const ideasRouter = Router();
 
+const ALLOWED_FIELDS = new Set([
+  'title', 'description', 'imageId', 'color',
+  'positionX', 'positionY', 'width', 'height',
+  'zIndex', 'linkedChapterId', 'type',
+]);
+
+// Helper: find idea and verify ownership through book → user_id
+function findOwnedIdea(req: any): Record<string, unknown> | null {
+  const userId = req.userId as string;
+  const row = db.prepare(`
+    SELECT i.* FROM ideas i
+    JOIN books b ON b.id = i.book_id
+    WHERE i.id = ? AND b.user_id = ?
+  `).get(req.params.id, userId) as Record<string, unknown> | undefined;
+  return row ?? null;
+}
+
 // Update idea
 ideasRouter.put('/:id', (req, res) => {
   const now = new Date().toISOString();
-  const existing = db.prepare('SELECT * FROM ideas WHERE id = ?').get(req.params.id);
+  const existing = findOwnedIdea(req);
   if (!existing) return res.status(404).json({ error: 'Idea not found' });
 
   const fields: string[] = [];
   const values: unknown[] = [];
 
   for (const [key, value] of Object.entries(req.body)) {
+    if (!ALLOWED_FIELDS.has(key)) continue;
     const col = camelToSnake(key);
     fields.push(`${col} = ?`);
     values.push(value);
@@ -28,6 +46,8 @@ ideasRouter.put('/:id', (req, res) => {
 
 // Delete idea
 ideasRouter.delete('/:id', (req, res) => {
+  const existing = findOwnedIdea(req);
+  if (!existing) return res.status(404).json({ error: 'Idea not found' });
   db.prepare('DELETE FROM ideas WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
@@ -35,7 +55,7 @@ ideasRouter.delete('/:id', (req, res) => {
 // Bring to front (z-index)
 ideasRouter.put('/:id/bring-to-front', (req, res) => {
   const now = new Date().toISOString();
-  const idea = db.prepare('SELECT * FROM ideas WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+  const idea = findOwnedIdea(req);
   if (!idea) return res.status(404).json({ error: 'Idea not found' });
 
   const maxRow = db.prepare(

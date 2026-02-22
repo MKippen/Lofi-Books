@@ -5,6 +5,10 @@ import { toCamel, toCamelArray, camelToSnake } from '../util.js';
 
 export const booksRouter = Router();
 
+const BOOK_ALLOWED_FIELDS = new Set([
+  'title', 'description', 'coverImageId', 'genre',
+]);
+
 // List books for the current user
 booksRouter.get('/', (req, res) => {
   const userId = (req as any).userId as string;
@@ -46,7 +50,7 @@ booksRouter.put('/:id', (req, res) => {
   const values: unknown[] = [];
 
   for (const [key, value] of Object.entries(req.body)) {
-    if (key === 'userId') continue; // Don't allow changing owner
+    if (!BOOK_ALLOWED_FIELDS.has(key)) continue;
     const col = camelToSnake(key);
     fields.push(`${col} = ?`);
     values.push(value);
@@ -81,8 +85,21 @@ booksRouter.post('/claim-orphaned', (req, res) => {
 
 // --- Nested routes for book children ---
 
+// Helper: verify the book belongs to the current user
+function verifyBookOwner(req: any, res: any): boolean {
+  const userId = req.userId as string;
+  const bookId = req.params.bookId;
+  const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(bookId, userId);
+  if (!book) {
+    res.status(404).json({ error: 'Book not found' });
+    return false;
+  }
+  return true;
+}
+
 // Characters for a book
 booksRouter.get('/:bookId/characters', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const chars = db.prepare(
     'SELECT * FROM characters WHERE book_id = ? ORDER BY sort_order'
   ).all(req.params.bookId) as Record<string, unknown>[];
@@ -90,6 +107,7 @@ booksRouter.get('/:bookId/characters', (req, res) => {
 });
 
 booksRouter.post('/:bookId/characters', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const id = uuid();
   const now = new Date().toISOString();
   const bookId = req.params.bookId;
@@ -117,6 +135,7 @@ booksRouter.post('/:bookId/characters', (req, res) => {
 });
 
 booksRouter.put('/:bookId/characters/reorder', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const { orderedIds } = req.body as { orderedIds: string[] };
   const stmt = db.prepare('UPDATE characters SET sort_order = ? WHERE id = ?');
   const reorder = db.transaction(() => {
@@ -128,6 +147,7 @@ booksRouter.put('/:bookId/characters/reorder', (req, res) => {
 
 // Chapters for a book
 booksRouter.get('/:bookId/chapters', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const chapters = db.prepare(
     'SELECT * FROM chapters WHERE book_id = ? ORDER BY sort_order'
   ).all(req.params.bookId);
@@ -135,6 +155,7 @@ booksRouter.get('/:bookId/chapters', (req, res) => {
 });
 
 booksRouter.post('/:bookId/chapters', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const id = uuid();
   const now = new Date().toISOString();
   const bookId = req.params.bookId;
@@ -157,6 +178,7 @@ booksRouter.post('/:bookId/chapters', (req, res) => {
 });
 
 booksRouter.put('/:bookId/chapters/reorder', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const { orderedIds } = req.body as { orderedIds: string[] };
   const stmt = db.prepare('UPDATE chapters SET sort_order = ? WHERE id = ?');
   const reorder = db.transaction(() => {
@@ -168,6 +190,7 @@ booksRouter.put('/:bookId/chapters/reorder', (req, res) => {
 
 // Ideas for a book
 booksRouter.get('/:bookId/ideas', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const ideas = db.prepare(
     'SELECT * FROM ideas WHERE book_id = ? ORDER BY z_index'
   ).all(req.params.bookId);
@@ -175,6 +198,7 @@ booksRouter.get('/:bookId/ideas', (req, res) => {
 });
 
 booksRouter.post('/:bookId/ideas', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const id = uuid();
   const now = new Date().toISOString();
   const bookId = req.params.bookId;
@@ -202,6 +226,7 @@ booksRouter.post('/:bookId/ideas', (req, res) => {
 
 // Illustrations for a chapter
 booksRouter.get('/:bookId/chapters/:chapterId/illustrations', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const illustrations = db.prepare(
     'SELECT * FROM chapter_illustrations WHERE chapter_id = ? AND book_id = ? ORDER BY sort_order'
   ).all(req.params.chapterId, req.params.bookId);
@@ -209,6 +234,7 @@ booksRouter.get('/:bookId/chapters/:chapterId/illustrations', (req, res) => {
 });
 
 booksRouter.post('/:bookId/chapters/:chapterId/illustrations', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const id = uuid();
   const now = new Date().toISOString();
   const bookId = req.params.bookId;
@@ -231,6 +257,7 @@ booksRouter.post('/:bookId/chapters/:chapterId/illustrations', (req, res) => {
 
 // Connections for a book
 booksRouter.get('/:bookId/connections', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const connections = db.prepare(
     'SELECT * FROM connections WHERE book_id = ? ORDER BY created_at'
   ).all(req.params.bookId);
@@ -238,6 +265,7 @@ booksRouter.get('/:bookId/connections', (req, res) => {
 });
 
 booksRouter.post('/:bookId/connections', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const id = uuid();
   const now = new Date().toISOString();
   const bookId = req.params.bookId;
@@ -254,6 +282,7 @@ booksRouter.post('/:bookId/connections', (req, res) => {
 
 // Timeline for a book
 booksRouter.get('/:bookId/timeline', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const events = db.prepare(
     'SELECT * FROM timeline_events WHERE book_id = ? ORDER BY sort_order'
   ).all(req.params.bookId) as Record<string, unknown>[];
@@ -268,6 +297,7 @@ booksRouter.get('/:bookId/timeline', (req, res) => {
 });
 
 booksRouter.post('/:bookId/timeline', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const id = uuid();
   const now = new Date().toISOString();
   const bookId = req.params.bookId;
@@ -286,6 +316,7 @@ booksRouter.post('/:bookId/timeline', (req, res) => {
 });
 
 booksRouter.put('/:bookId/timeline/reorder', (req, res) => {
+  if (!verifyBookOwner(req, res)) return;
   const { orderedIds } = req.body as { orderedIds: string[] };
   const stmt = db.prepare('UPDATE timeline_events SET sort_order = ? WHERE id = ?');
   const reorder = db.transaction(() => {

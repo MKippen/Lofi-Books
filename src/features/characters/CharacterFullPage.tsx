@@ -11,7 +11,9 @@ import {
   BookOpen,
   TrendingUp,
   User,
+  Wrench,
 } from 'lucide-react';
+import { useWritingTools } from '@/components/layout/WritingToolsContext';
 import { useCharacter, deleteCharacter } from '@/hooks/useCharacters';
 import { useImage } from '@/hooks/useImageStore';
 import Button from '@/components/ui/Button';
@@ -37,6 +39,7 @@ const roleLabels: Record<string, string> = {
 export default function CharacterFullPage() {
   const { bookId, characterId } = useParams<{ bookId: string; characterId: string }>();
   const navigate = useNavigate();
+  const { openWritingTools } = useWritingTools();
   const { character, loading } = useCharacter(characterId);
   const { url: imageUrl } = useImage(character?.mainImageId ?? null);
 
@@ -101,6 +104,14 @@ export default function CharacterFullPage() {
             <Trash2 size={16} />
             Delete
           </Button>
+          <button
+            type="button"
+            onClick={() => openWritingTools()}
+            className="p-1.5 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer group"
+            title="Writing Tools"
+          >
+            <Wrench size={16} className="group-hover:rotate-[-15deg] transition-transform duration-200" />
+          </button>
         </div>
       </div>
 

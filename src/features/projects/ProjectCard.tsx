@@ -56,8 +56,8 @@ export default function ProjectCard({ book }: ProjectCardProps) {
                 className="w-full h-full flex flex-col items-center justify-center p-4"
                 style={{ background: `linear-gradient(to bottom, ${color1}, ${color2})` }}
               >
-                <BookOpen size={36} className="text-white/50 mb-3" strokeWidth={1.5} />
-                <span className="text-white/80 font-heading text-sm text-center leading-tight line-clamp-3">
+                <BookOpen size={42} className="text-white/50 mb-3" strokeWidth={1.5} />
+                <span className="text-white/80 font-heading text-base text-center leading-tight line-clamp-3">
                   {book.title}
                 </span>
               </div>
@@ -78,8 +78,8 @@ export default function ProjectCard({ book }: ProjectCardProps) {
       </div>
 
       {/* Book info below */}
-      <div className="mt-3 text-center w-full max-w-[170px]">
-        <h3 className="font-heading text-sm text-indigo truncate">{book.title}</h3>
+      <div className="mt-4 text-center w-full max-w-[200px]">
+        <h3 className="font-heading text-base text-indigo truncate">{book.title}</h3>
         {book.genre && (
           <div className="mt-1">
             <Badge variant="secondary" size="sm">{book.genre}</Badge>

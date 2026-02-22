@@ -148,4 +148,11 @@ try {
   // Column already exists
 }
 
+// Migration: add created_by_name to wishlist_items for shared wishlist display
+try {
+  db.exec(`ALTER TABLE wishlist_items ADD COLUMN created_by_name TEXT NOT NULL DEFAULT ''`);
+} catch {
+  // Column already exists
+}
+
 export { db, IMAGES_DIR, DATA_DIR };

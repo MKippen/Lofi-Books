@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Plus, Bug, Sparkles, Lightbulb, Check, Undo2, Trash2, Pencil } from 'lucide-react';
+import { Plus, Bug, Sparkles, Lightbulb, Check, Undo2, Trash2, Pencil, User } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import TopBar from '@/components/layout/TopBar';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useWishlist, toggleWishlistItemStatus, deleteWishlistItem } from '@/hooks/useWishlist';
+import { useAuth } from '@/hooks/useAuth';
+import { getUserId } from '@/api/client';
 import WishlistItemForm from './WishlistItemForm';
 import type { WishlistItem, WishlistItemType } from '@/types';
 
@@ -34,6 +36,8 @@ type FilterType = 'all' | WishlistItemType;
 
 export default function WishlistPage() {
   const { items, loading } = useWishlist();
+  const { displayName } = useAuth();
+  const currentUserId = getUserId();
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<WishlistItem | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -96,7 +100,7 @@ export default function WishlistPage() {
         <div className="max-w-3xl mx-auto">
           {/* Friendly intro */}
           <p className="text-sm text-indigo/40 mb-6">
-            Write down bugs you find or features you want. When you and your dad work on the site together, you can look here for ideas!
+            A shared wish list! Write down bugs, features, or ideas — everyone can see them and mark them as done.
           </p>
 
           {/* Filter tabs */}
@@ -162,6 +166,7 @@ export default function WishlistPage() {
                     <WishCard
                       key={item.id}
                       item={item}
+                      isOwner={item.userId === currentUserId}
                       onToggle={() => toggleWishlistItemStatus(item.id)}
                       onEdit={() => handleEdit(item)}
                       onDelete={() => setDeleteTarget(item.id)}
@@ -181,6 +186,7 @@ export default function WishlistPage() {
                       <WishCard
                         key={item.id}
                         item={item}
+                        isOwner={item.userId === currentUserId}
                         onToggle={() => toggleWishlistItemStatus(item.id)}
                         onEdit={() => handleEdit(item)}
                         onDelete={() => setDeleteTarget(item.id)}
@@ -206,6 +212,7 @@ export default function WishlistPage() {
         onClose={handleCloseForm}
         onSaved={handleSaved}
         item={editingItem}
+        createdByName={displayName}
       />
 
       <ConfirmDialog
@@ -225,15 +232,17 @@ export default function WishlistPage() {
 
 interface WishCardProps {
   item: WishlistItem;
+  isOwner: boolean;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-function WishCard({ item, onToggle, onEdit, onDelete }: WishCardProps) {
+function WishCard({ item, isOwner, onToggle, onEdit, onDelete }: WishCardProps) {
   const isDone = item.status === 'done';
   const config = TYPE_CONFIG[item.type];
   const Icon = config.icon;
+  const authorName = item.createdByName || 'Someone';
 
   return (
     <div
@@ -283,9 +292,16 @@ function WishCard({ item, onToggle, onEdit, onDelete }: WishCardProps) {
           </p>
         )}
 
-        <p className="text-[10px] text-indigo/25 mt-2">
-          {formatDistanceToNow(item.createdAt, { addSuffix: true })}
-        </p>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="inline-flex items-center gap-1 text-[10px] text-indigo/30">
+            <User size={10} />
+            {authorName}
+          </span>
+          <span className="text-[10px] text-indigo/20">·</span>
+          <span className="text-[10px] text-indigo/25">
+            {formatDistanceToNow(item.createdAt, { addSuffix: true })}
+          </span>
+        </div>
       </div>
 
       {/* Action buttons — show on hover + always on touch */}
@@ -300,22 +316,26 @@ function WishCard({ item, onToggle, onEdit, onDelete }: WishCardProps) {
             <Undo2 size={14} />
           </button>
         )}
-        <button
-          type="button"
-          onClick={onEdit}
-          className="p-1.5 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
-          title="Edit"
-        >
-          <Pencil size={14} />
-        </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="p-1.5 rounded-lg text-indigo/30 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-          title="Delete"
-        >
-          <Trash2 size={14} />
-        </button>
+        {isOwner && (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="p-1.5 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+            title="Edit"
+          >
+            <Pencil size={14} />
+          </button>
+        )}
+        {isOwner && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="p-1.5 rounded-lg text-indigo/30 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+            title="Delete"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, BookA, Replace, Volume2 } from 'lucide-react';
-import TopBar from '@/components/layout/TopBar';
+import { Search, BookA, Replace, Volume2, X, Wrench, Ghost } from 'lucide-react';
+import AssistPanel from './AssistPanel';
+import type { ChapterContext } from '@/components/layout/WritingToolsContext';
 
 // ---------------------------------------------------------------------------
 // Types for DictionaryAPI response
@@ -151,7 +152,7 @@ function SearchBox({
             }
           }}
           placeholder={placeholder}
-          className="w-full rounded-xl border border-primary/15 bg-surface pl-9 pr-4 py-2.5 text-sm text-indigo placeholder:text-indigo/30 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 transition-colors"
+          className="w-full rounded-xl border border-primary/15 bg-cream pl-9 pr-4 py-2.5 text-sm text-indigo placeholder:text-indigo/30 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 transition-colors"
           autoComplete="off"
         />
         {visibleSuggestions && (
@@ -181,9 +182,9 @@ function SearchBox({
       <button
         type="submit"
         disabled={!value.trim() || loading}
-        className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
       >
-        {loading ? 'Looking up...' : 'Search'}
+        {loading ? '...' : 'Go'}
       </button>
     </form>
   );
@@ -249,10 +250,10 @@ function DictionaryPanel() {
   const handleSearch = () => searchWord(query);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-primary">
-        <BookA size={20} />
-        <h2 className="font-heading text-lg">Dictionary</h2>
+        <BookA size={18} />
+        <h2 className="font-heading text-base">Dictionary</h2>
       </div>
 
       <SearchBox
@@ -272,7 +273,7 @@ function DictionaryPanel() {
       {entries && entries.map((entry, i) => (
         <div key={i} className="space-y-3">
           <div className="flex items-baseline gap-3">
-            <span className="font-heading text-xl text-indigo">{entry.word}</span>
+            <span className="font-heading text-lg text-indigo">{entry.word}</span>
             <PhoneticBadge phonetics={entry.phonetics} />
           </div>
 
@@ -283,7 +284,7 @@ function DictionaryPanel() {
               </span>
 
               <ol className="list-decimal list-inside space-y-2 text-sm text-indigo/80">
-                {meaning.definitions.slice(0, 5).map((def, di) => (
+                {meaning.definitions.slice(0, 4).map((def, di) => (
                   <li key={di} className="leading-relaxed">
                     {def.definition}
                     {def.example && (
@@ -298,7 +299,7 @@ function DictionaryPanel() {
               {meaning.synonyms.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5 mt-1">
                   <span className="text-[10px] uppercase tracking-wider text-indigo/30 font-semibold">Syn:</span>
-                  {meaning.synonyms.slice(0, 8).map((syn) => (
+                  {meaning.synonyms.slice(0, 6).map((syn) => (
                     <button
                       key={syn}
                       type="button"
@@ -371,10 +372,10 @@ function ThesaurusPanel() {
   const uniqueAntonyms = [...new Set(allAntonyms)];
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-secondary">
-        <Replace size={20} />
-        <h2 className="font-heading text-lg">Thesaurus</h2>
+        <Replace size={18} />
+        <h2 className="font-heading text-base">Thesaurus</h2>
       </div>
 
       <SearchBox
@@ -392,9 +393,9 @@ function ThesaurusPanel() {
       )}
 
       {entries && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div className="flex items-baseline gap-3">
-            <span className="font-heading text-xl text-indigo">{entries[0].word}</span>
+            <span className="font-heading text-lg text-indigo">{entries[0].word}</span>
             <PhoneticBadge phonetics={entries[0].phonetics} />
           </div>
 
@@ -476,27 +477,129 @@ function ThesaurusPanel() {
 }
 
 // ---------------------------------------------------------------------------
-// Main Page
+// Slide-out Panel
 // ---------------------------------------------------------------------------
 
-export default function WritingToolsPage() {
+type ToolTab = 'dictionary' | 'thesaurus' | 'hanako';
+
+const TABS: { id: ToolTab; label: string; icon: typeof BookA }[] = [
+  { id: 'dictionary', label: 'Dictionary', icon: BookA },
+  { id: 'thesaurus', label: 'Thesaurus', icon: Replace },
+  { id: 'hanako', label: 'Hanako', icon: Ghost },
+];
+
+interface WritingToolsPanelProps {
+  open: boolean;
+  onClose: () => void;
+  chapterContext?: ChapterContext | null;
+}
+
+export default function WritingToolsPanel({ open, onClose, chapterContext }: WritingToolsPanelProps) {
+  const [activeTab, setActiveTab] = useState<ToolTab>('hanako');
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  // Prevent body scroll when panel is open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
   return (
-    <div className="flex flex-col min-h-full">
-      <TopBar title="Writing Tools" />
+    <>
+      {/* Backdrop */}
+      <div
+        className={`
+          fixed inset-0 z-[70] bg-black/20 backdrop-blur-sm
+          transition-opacity duration-300
+          ${open ? 'opacity-100' : 'opacity-0 pointer-events-none'}
+        `}
+        onClick={onClose}
+      />
 
-      <div className="flex-1 p-6 sm:p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-5xl mx-auto">
-          {/* Dictionary */}
-          <div className="rounded-2xl bg-surface border border-primary/10 shadow-sm p-5">
-            <DictionaryPanel />
+      {/* Panel */}
+      <div
+        className={`
+          fixed top-0 right-0 h-full z-[75]
+          w-[420px] max-w-[90vw]
+          bg-surface shadow-2xl border-l border-primary/10
+          flex flex-col
+          transition-transform duration-300 ease-in-out
+          ${open ? 'translate-x-0' : 'translate-x-full'}
+        `}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-primary/10 bg-surface shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
+              <Wrench size={16} className="text-primary" />
+            </div>
+            <h2 className="font-heading text-lg text-indigo">Writing Tools</h2>
           </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex items-center justify-center w-8 h-8 rounded-lg text-indigo/40 hover:text-indigo hover:bg-primary/10 transition-colors cursor-pointer"
+            title="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
 
-          {/* Thesaurus */}
-          <div className="rounded-2xl bg-surface border border-primary/10 shadow-sm p-5">
-            <ThesaurusPanel />
-          </div>
+        {/* Tab bar */}
+        <div className="flex border-b border-primary/10 bg-surface shrink-0">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold transition-colors cursor-pointer ${
+                  activeTab === tab.id
+                    ? 'text-primary border-b-2 border-primary'
+                    : 'text-indigo/40 hover:text-indigo/60'
+                }`}
+              >
+                <Icon size={14} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Tab content */}
+        <div className={`flex-1 overflow-y-auto min-h-0 p-5 ${activeTab === 'hanako' ? 'hidden' : ''}`}>
+          {activeTab === 'dictionary' && (
+            <div className="rounded-2xl bg-cream border border-primary/10 p-4">
+              <DictionaryPanel />
+            </div>
+          )}
+
+          {activeTab === 'thesaurus' && (
+            <div className="rounded-2xl bg-cream border border-primary/10 p-4">
+              <ThesaurusPanel />
+            </div>
+          )}
+        </div>
+
+        {/* Hanako panel — always mounted to preserve session */}
+        <div className={`flex-1 min-h-0 p-5 ${activeTab === 'hanako' ? 'flex flex-col' : 'hidden'}`}>
+          <AssistPanel chapterContext={chapterContext ?? null} />
         </div>
       </div>
-    </div>
+    </>
   );
 }

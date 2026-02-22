@@ -33,11 +33,15 @@ interface SectionCardProps {
 
 function SectionCard({ icon: Icon, iconColor, label, stat, onClick }: SectionCardProps) {
   return (
-    <Card hover onClick={onClick} className="p-6">
-      <div className="flex flex-col items-center gap-3 text-center">
-        <Icon size={36} className={iconColor} strokeWidth={1.5} />
-        <h3 className="font-heading text-lg text-indigo">{label}</h3>
-        <p className="text-sm text-indigo/50">{stat}</p>
+    <Card hover onClick={onClick} className="px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/5 shrink-0">
+          <Icon size={20} className={iconColor} strokeWidth={1.5} />
+        </div>
+        <div className="min-w-0">
+          <h3 className="font-heading text-sm text-indigo leading-tight">{label}</h3>
+          <p className="text-xs text-indigo/40 truncate">{stat}</p>
+        </div>
       </div>
     </Card>
   );
@@ -162,7 +166,7 @@ export default function BookDashboard() {
         </div>
 
         {/* Section cards grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {sections.map((section) => (
             <SectionCard
               key={section.path}

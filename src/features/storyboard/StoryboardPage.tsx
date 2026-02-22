@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'react-router';
-import { StickyNote, Image, BookText, Lightbulb, Cable } from 'lucide-react';
-import { useIdeas } from '@/hooks/useIdeas';
+import { StickyNote, Image, BookText, Lightbulb, Cable, Sticker } from 'lucide-react';
+import { useIdeas, createIdea } from '@/hooks/useIdeas';
 import { useConnections, createConnection, deleteConnection, updateConnection } from '@/hooks/useConnections';
+import { getBook } from '@/api/books';
 import TopBar from '@/components/layout/TopBar';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import InfiniteCorkBoard from './InfiniteCorkBoard';
 import IdeaForm from './IdeaForm';
+import StickerPicker from './StickerPicker';
 import type { Idea, IdeaType, StringColor } from '@/types';
 import { STRING_COLORS } from '@/types';
 
@@ -18,11 +20,21 @@ export default function StoryboardPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [formType, setFormType] = useState<IdeaType>('note');
   const [editingIdea, setEditingIdea] = useState<Idea | undefined>(undefined);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
+  const [bookGenre, setBookGenre] = useState('');
 
   // Connect mode state
   const [connectMode, setConnectMode] = useState(false);
   const [connectColor, setConnectColor] = useState<StringColor>('red');
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
+
+  // Fetch book genre for sticker suggestions
+  useEffect(() => {
+    if (!bookId) return;
+    getBook(bookId).then((book) => {
+      if (book?.genre) setBookGenre(book.genre);
+    }).catch(() => { /* ignore */ });
+  }, [bookId]);
 
   const openForm = (type: IdeaType) => {
     setFormType(type);
@@ -32,6 +44,8 @@ export default function StoryboardPage() {
 
   const handleEditIdea = (idea: Idea) => {
     if (connectMode) return; // Don't open edit in connect mode
+    // Don't open form for stickers — they use the sticker picker
+    if (idea.type === 'sticker') return;
     setFormType(idea.type);
     setEditingIdea(idea);
     setFormOpen(true);
@@ -40,6 +54,23 @@ export default function StoryboardPage() {
   const handleCloseForm = () => {
     setFormOpen(false);
     setEditingIdea(undefined);
+  };
+
+  const handleStickerSelect = async (iconName: string) => {
+    if (!bookId) return;
+    await createIdea({
+      bookId,
+      type: 'sticker',
+      title: iconName,
+      description: '',
+      imageId: null,
+      color: 'sakura-white',
+      linkedChapterId: null,
+      positionX: Math.floor(Math.random() * 700) + 100,
+      positionY: Math.floor(Math.random() * 500) + 100,
+      width: 80,
+      height: 80,
+    });
   };
 
   const handleConnectClick = (ideaId: string) => {
@@ -73,17 +104,21 @@ export default function StoryboardPage() {
   return (
     <div className="flex flex-col h-full">
       <TopBar title="Storyboard">
-        <Button variant="primary" size="sm" onClick={() => openForm('note')}>
+        <Button variant="ghost" size="sm" onClick={() => openForm('note')}>
           <StickyNote size={18} />
           Add Sticky Note
         </Button>
-        <Button variant="secondary" size="sm" onClick={() => openForm('image')}>
+        <Button variant="ghost" size="sm" onClick={() => openForm('image')}>
           <Image size={18} />
           Add Photo
         </Button>
         <Button variant="ghost" size="sm" onClick={() => openForm('chapter-idea')}>
           <BookText size={18} />
           Add Chapter Idea
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setStickerPickerOpen(true)}>
+          <Sticker size={18} />
+          Add Sticker
         </Button>
 
         <div className="w-px h-6 bg-indigo/10 mx-1" />
@@ -175,6 +210,13 @@ export default function StoryboardPage() {
           idea={editingIdea}
         />
       )}
+
+      <StickerPicker
+        isOpen={stickerPickerOpen}
+        onClose={() => setStickerPickerOpen(false)}
+        onSelect={handleStickerSelect}
+        genre={bookGenre}
+      />
     </div>
   );
 }

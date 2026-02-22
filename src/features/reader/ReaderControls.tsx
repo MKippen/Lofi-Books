@@ -8,6 +8,7 @@ interface ReaderControlsProps {
   currentPage: number;
   totalPages: number;
   chapterTitle: string;
+  step?: number;
 }
 
 export default function ReaderControls({
@@ -18,12 +19,13 @@ export default function ReaderControls({
   currentPage,
   totalPages,
   chapterTitle,
+  step = 1,
 }: ReaderControlsProps) {
-  const progressPercent = totalPages > 0 ? ((currentPage + 1) / totalPages) * 100 : 0;
+  const progressPercent = totalPages > 0 ? (Math.min(currentPage + step, totalPages) / totalPages) * 100 : 0;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-surface/95 backdrop-blur-sm border-t border-primary/10 z-50">
-      <div className="flex items-center justify-between px-8 py-3">
+    <div className="shrink-0 bg-surface/95 backdrop-blur-sm border-t border-primary/10 z-50">
+      <div className="flex items-center justify-between px-8 py-2">
         {/* Previous button */}
         <button
           type="button"

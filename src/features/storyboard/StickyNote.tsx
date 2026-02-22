@@ -51,6 +51,7 @@ export default function StickyNote({ idea, onDelete }: StickyNoteProps) {
       {/* Delete button */}
       <button
         className="absolute top-1.5 right-1.5 p-1.5 rounded opacity-0 group-hover:opacity-100 touch-show transition-opacity cursor-pointer hover:bg-black/10"
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
           onDelete(idea.id);

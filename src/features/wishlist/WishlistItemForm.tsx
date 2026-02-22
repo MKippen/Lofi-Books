@@ -12,6 +12,7 @@ interface WishlistItemFormProps {
   onClose: () => void;
   onSaved: () => void;
   item?: WishlistItem;
+  createdByName: string;
 }
 
 const TYPE_OPTIONS: { value: WishlistItemType; label: string; icon: typeof Bug; hint: string; color: string }[] = [
@@ -38,7 +39,7 @@ const TYPE_OPTIONS: { value: WishlistItemType; label: string; icon: typeof Bug; 
   },
 ];
 
-export default function WishlistItemForm({ isOpen, onClose, onSaved, item }: WishlistItemFormProps) {
+export default function WishlistItemForm({ isOpen, onClose, onSaved, item, createdByName }: WishlistItemFormProps) {
   const isEditing = !!item;
   const [type, setType] = useState<WishlistItemType>('idea');
   const [title, setTitle] = useState('');
@@ -74,6 +75,7 @@ export default function WishlistItemForm({ isOpen, onClose, onSaved, item }: Wis
           type,
           title: title.trim(),
           description: description.trim(),
+          createdByName,
         });
       }
       onSaved();

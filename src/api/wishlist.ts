@@ -6,7 +6,7 @@ export async function listWishlistItems(): Promise<WishlistItem[]> {
 }
 
 export async function createWishlistItemApi(
-  data: Pick<WishlistItem, 'title' | 'description' | 'type'>,
+  data: Pick<WishlistItem, 'title' | 'description' | 'type' | 'createdByName'>,
 ): Promise<string> {
   const { id } = await apiFetch<{ id: string }>('/wishlist', {
     method: 'POST',

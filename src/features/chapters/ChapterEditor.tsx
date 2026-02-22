@@ -7,7 +7,9 @@ import CharacterCount from '@tiptap/extension-character-count';
 import Underline from '@tiptap/extension-underline';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, StickyNote, Palette } from 'lucide-react';
+import { IllustrationEmbed } from './extensions/IllustrationEmbed';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, StickyNote, Palette, Wrench } from 'lucide-react';
+import { useWritingTools } from '@/components/layout/WritingToolsContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getChapterApi } from '@/api/chapters';
 import { useChapters, createChapter, updateChapter } from '@/hooks/useChapters';
@@ -16,6 +18,7 @@ import type { Chapter, ChapterStatus } from '@/types';
 import EditorToolbar from './EditorToolbar';
 import ChapterListSidebar from './ChapterListSidebar';
 import ChapterNotesSidebar from './ChapterNotesSidebar';
+import HanakoGhostPopover from '@/features/hanako/HanakoGhostPopover';
 import ChapterIllustrationsSidebar from './ChapterIllustrationsSidebar';
 import WordCount from './WordCount';
 
@@ -61,7 +64,9 @@ export default function ChapterEditor() {
   const [rightOpen, setRightOpen] = useState(!isSmallScreen);
   const [rightTab, setRightTab] = useState<RightTab>('notes');
 
+  const { openWritingTools } = useWritingTools();
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
 
   // Fetch chapter from db on mount / chapterId change
   useEffect(() => {
@@ -95,12 +100,18 @@ export default function ChapterEditor() {
     saveTimeoutRef.current = setTimeout(() => setSaveState('idle'), 2000);
   }, []);
 
+  // Error handler for debounced saves — reset state so "Saving..." doesn't stick
+  const handleSaveError = useCallback((err: unknown) => {
+    console.error('Chapter save failed:', err);
+    setSaveState('idle');
+  }, []);
+
   // Debounced save for content
   const debouncedSaveContent = useDebouncedCallback(
     (html: string, words: number) => {
       if (!chapterId) return;
       setSaveState('saving');
-      updateChapter(chapterId, { content: html, wordCount: words }).then(flashSaved);
+      updateChapter(chapterId, { content: html, wordCount: words }).then(flashSaved).catch(handleSaveError);
     },
     1000,
   );
@@ -110,7 +121,7 @@ export default function ChapterEditor() {
     (newTitle: string) => {
       if (!chapterId) return;
       setSaveState('saving');
-      updateChapter(chapterId, { title: newTitle }).then(flashSaved);
+      updateChapter(chapterId, { title: newTitle }).then(flashSaved).catch(handleSaveError);
     },
     1000,
   );
@@ -120,7 +131,7 @@ export default function ChapterEditor() {
     (newNotes: string) => {
       if (!chapterId) return;
       setSaveState('saving');
-      updateChapter(chapterId, { notes: newNotes }).then(flashSaved);
+      updateChapter(chapterId, { notes: newNotes }).then(flashSaved).catch(handleSaveError);
     },
     1000,
   );
@@ -134,12 +145,46 @@ export default function ChapterEditor() {
       Underline,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Highlight.configure({ multicolor: true }),
+      IllustrationEmbed,
     ],
     content: chapter?.content || '',
     editorProps: {
       attributes: {
         class: 'prose prose-lg max-w-none focus:outline-none min-h-[500px] font-reader',
         spellcheck: 'true',
+      },
+      handleKeyDown: (view, event) => {
+        // Prevent Tab from escaping the editor to the sidebar.
+        // Insert a tab-sized indent instead.
+        if (event.key === 'Tab' && !event.shiftKey) {
+          event.preventDefault();
+          const { state, dispatch } = view;
+          dispatch(state.tr.insertText('\t'));
+          return true;
+        }
+        return false;
+      },
+      handleDrop: (view, event) => {
+        const data = event.dataTransfer?.getData('application/illustration-embed');
+        if (!data) return false;
+
+        event.preventDefault();
+        try {
+          const { illustrationId, imageId, caption } = JSON.parse(data);
+          const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
+          if (!coordinates) return false;
+
+          const node = view.state.schema.nodes.illustrationEmbed.create({
+            illustrationId,
+            imageId,
+            caption,
+          });
+          const tr = view.state.tr.insert(coordinates.pos, node);
+          view.dispatch(tr);
+          return true;
+        } catch {
+          return false;
+        }
       },
     },
     onUpdate: ({ editor: ed }) => {
@@ -173,7 +218,7 @@ export default function ChapterEditor() {
     if (!chapterId) return;
     setStatus(newStatus);
     setSaveState('saving');
-    updateChapter(chapterId, { status: newStatus }).then(flashSaved);
+    updateChapter(chapterId, { status: newStatus }).then(flashSaved).catch(handleSaveError);
   };
 
   const handleNewChapter = async () => {
@@ -247,6 +292,20 @@ export default function ChapterEditor() {
 
           <button
             type="button"
+            onClick={() => openWritingTools({
+              chapterId: chapterId!,
+              title,
+              content: editor?.getHTML() || '',
+              wordCount: editor?.storage.characterCount.words() || 0,
+            })}
+            className="p-2 text-indigo/30 hover:text-primary transition-colors cursor-pointer group"
+            title="Writing Tools"
+          >
+            <Wrench size={16} className="group-hover:rotate-[-15deg] transition-transform duration-200" />
+          </button>
+
+          <button
+            type="button"
             onClick={() => setRightOpen((v) => !v)}
             className="p-2 text-indigo/40 hover:text-indigo transition-colors cursor-pointer"
             title={rightOpen ? 'Hide panel' : 'Show panel'}
@@ -256,7 +315,7 @@ export default function ChapterEditor() {
         </div>
 
         {/* Editor area */}
-        <div className="flex-1 overflow-y-auto bg-cream">
+        <div ref={editorContainerRef} className="flex-1 overflow-y-auto bg-cream">
           <div className="max-w-3xl mx-auto bg-surface py-6 px-4 sm:px-6 lg:px-12 min-h-screen shadow-sm">
             {/* Chapter title */}
             <input
@@ -376,13 +435,25 @@ export default function ChapterEditor() {
                 <ChapterNotesSidebar notes={notes} onChange={handleNotesChange} />
               ) : (
                 bookId && chapterId && (
-                  <ChapterIllustrationsSidebar bookId={bookId} chapterId={chapterId} />
+                  <ChapterIllustrationsSidebar bookId={bookId} chapterId={chapterId} editor={editor} />
                 )
               )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Hanako ghost popover for text selection */}
+      <HanakoGhostPopover
+        containerRef={editorContainerRef}
+        tiptapEditor={editor}
+        chapterContext={chapterId ? {
+          chapterId,
+          title,
+          content: editor?.getHTML() || '',
+          wordCount: editor?.storage.characterCount.words() || 0,
+        } : null}
+      />
     </div>
   );
 }

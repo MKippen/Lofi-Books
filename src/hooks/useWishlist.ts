@@ -34,7 +34,7 @@ export function useWishlist() {
 // ---------------------------------------------------------------------------
 
 export async function createWishlistItem(
-  data: Pick<WishlistItem, 'title' | 'description' | 'type'>,
+  data: Pick<WishlistItem, 'title' | 'description' | 'type' | 'createdByName'>,
 ): Promise<string> {
   const id = await createWishlistItemApi(data);
   notifyChange();

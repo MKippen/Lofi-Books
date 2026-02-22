@@ -6,9 +6,25 @@ import path from 'path';
 
 export const charactersRouter = Router();
 
+const ALLOWED_FIELDS = new Set([
+  'name', 'mainImageId', 'backstory', 'development',
+  'personalityTraits', 'relationships', 'specialAbilities', 'role', 'sortOrder',
+]);
+
+// Helper: find character and verify ownership through book → user_id
+function findOwnedCharacter(req: any): Record<string, unknown> | null {
+  const userId = req.userId as string;
+  const row = db.prepare(`
+    SELECT ch.* FROM characters ch
+    JOIN books b ON b.id = ch.book_id
+    WHERE ch.id = ? AND b.user_id = ?
+  `).get(req.params.id, userId) as Record<string, unknown> | undefined;
+  return row ?? null;
+}
+
 // Get single character
 charactersRouter.get('/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+  const row = findOwnedCharacter(req);
   if (!row) return res.status(404).json({ error: 'Character not found' });
   res.json(parseCharacterRow(row));
 });
@@ -16,13 +32,14 @@ charactersRouter.get('/:id', (req, res) => {
 // Update character
 charactersRouter.put('/:id', (req, res) => {
   const now = new Date().toISOString();
-  const existing = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  const existing = findOwnedCharacter(req);
   if (!existing) return res.status(404).json({ error: 'Character not found' });
 
   const fields: string[] = [];
   const values: unknown[] = [];
 
   for (const [key, value] of Object.entries(req.body)) {
+    if (!ALLOWED_FIELDS.has(key)) continue;
     const col = camelToSnake(key);
     if (Array.isArray(value)) {
       fields.push(`${col} = ?`);
@@ -42,8 +59,10 @@ charactersRouter.put('/:id', (req, res) => {
 
 // Delete character + associated image
 charactersRouter.delete('/:id', (req, res) => {
-  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
-  if (char?.main_image_id) {
+  const char = findOwnedCharacter(req);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  if (char.main_image_id) {
     const imgId = char.main_image_id as string;
     const imgRow = db.prepare('SELECT * FROM images WHERE id = ?').get(imgId) as Record<string, unknown> | undefined;
     if (imgRow) {

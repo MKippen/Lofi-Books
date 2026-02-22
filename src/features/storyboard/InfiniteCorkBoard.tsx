@@ -4,6 +4,7 @@ import { updateIdea, bringToFront, deleteIdea } from '@/hooks/useIdeas';
 import StickyNote from './StickyNote';
 import PolaroidPhoto from './PolaroidPhoto';
 import ChapterIdeaCard from './ChapterIdeaCard';
+import StickerIcon from './StickerIcon';
 import type { Idea, Connection, StringColor } from '@/types';
 import { IDEA_COLORS, STRING_COLORS } from '@/types';
 
@@ -19,7 +20,6 @@ const MINIMAP_WIDTH = 200;
 const MINIMAP_HEIGHT = (MINIMAP_WIDTH / CANVAS_WIDTH) * CANVAS_HEIGHT; // keeps aspect ratio
 
 // Zoom limits
-const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 2;
 const ZOOM_STEP = 0.15;
 
@@ -65,8 +65,10 @@ export default function InfiniteCorkBoard({
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const zoomRef = useRef(1); // keep sync ref for use in callbacks
+  const minZoomRef = useRef(0.3); // dynamic — recalculated from container height
 
   // Track scroll position + viewport size for the mini-map (accounting for zoom)
+  // Also compute the dynamic minimum zoom so the canvas always fills the viewport height
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -79,6 +81,8 @@ export default function InfiniteCorkBoard({
         w: container.clientWidth / z,
         h: container.clientHeight / z,
       });
+      // Min zoom = the zoom level at which CANVAS_HEIGHT exactly fills the container height
+      minZoomRef.current = Math.max(0.1, container.clientHeight / CANVAS_HEIGHT);
     };
 
     update();
@@ -97,7 +101,7 @@ export default function InfiniteCorkBoard({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+    const clamped = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, newZoom));
     const oldZoom = zoomRef.current;
 
     // Center-of-viewport in canvas coords before zoom change
@@ -118,17 +122,17 @@ export default function InfiniteCorkBoard({
   const zoomOut = useCallback(() => applyZoom(zoomRef.current - ZOOM_STEP), [applyZoom]);
   const zoomReset = useCallback(() => applyZoom(1), [applyZoom]);
 
-  // Wheel zoom (pinch on trackpad sends wheel events with ctrlKey)
+  // Wheel zoom — all scroll events on the canvas trigger zoom
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
     const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const delta = -e.deltaY * 0.01;
-        applyZoom(zoomRef.current + delta);
-      }
+      e.preventDefault();
+      // Trackpads send small pixel deltas; mice send larger line-mode deltas
+      const sensitivity = (e.ctrlKey || e.metaKey) ? 0.01 : 0.005;
+      const delta = -e.deltaY * sensitivity;
+      applyZoom(zoomRef.current + delta);
     };
 
     container.addEventListener('wheel', handleWheel, { passive: false });
@@ -198,6 +202,9 @@ export default function InfiniteCorkBoard({
     const target = e.currentTarget as HTMLElement;
     target.releasePointerCapture(e.pointerId);
 
+    dragRef.current = null;
+    setDraggingId(null);
+
     if (drag.hasMoved) {
       const z = zoomRef.current;
       const dx = (e.clientX - drag.startX) / z;
@@ -205,21 +212,30 @@ export default function InfiniteCorkBoard({
       const newX = clampX(drag.originX + dx);
       const newY = clampY(drag.originY + dy);
 
+      // Keep the drag offset alive until the API save completes and the ideas
+      // list refreshes — this prevents the card from jumping back to the old
+      // position during the async round-trip.
+      try {
+        await updateIdea(idea.id, { positionX: newX, positionY: newY });
+      } catch (err) {
+        console.error('Failed to save idea position:', err);
+      }
+
+      // Now that the ideas array should reflect the new position, clear the offset
       setDragOffsets((prev) => {
         const next = { ...prev };
         delete next[drag.ideaId];
         return next;
       });
-
-      await updateIdea(idea.id, { positionX: newX, positionY: newY });
     } else if (connectMode && onConnectClick) {
       onConnectClick(idea.id);
     } else {
-      await bringToFront(idea.id, bookId);
+      try {
+        await bringToFront(idea.id, bookId);
+      } catch (err) {
+        console.error('Failed to bring idea to front:', err);
+      }
     }
-
-    dragRef.current = null;
-    setDraggingId(null);
   }, [bookId, clampX, clampY, connectMode, onConnectClick]);
 
   const handleIdeaDoubleClick = useCallback((e: React.MouseEvent, idea: Idea) => {
@@ -329,6 +345,8 @@ export default function InfiniteCorkBoard({
         return <PolaroidPhoto idea={idea} onDelete={handleDelete} />;
       case 'chapter-idea':
         return <ChapterIdeaCard idea={idea} onDelete={handleDelete} />;
+      case 'sticker':
+        return <StickerIcon idea={idea} onDelete={() => handleDelete(idea.id)} />;
       default:
         return null;
     }
@@ -481,6 +499,10 @@ export default function InfiniteCorkBoard({
             const posY = clampY(idea.positionY + (offset?.y ?? 0));
             const isDragging = draggingId === idea.id;
             const isConnectSource = connectMode && connectFrom === idea.id;
+            const isSticker = idea.type === 'sticker';
+
+            // Stickers render on a higher z-layer so they sit on top of cards
+            const baseZ = isSticker ? idea.zIndex + 5000 : idea.zIndex;
 
             return (
               <div
@@ -489,7 +511,7 @@ export default function InfiniteCorkBoard({
                 style={{
                   left: posX,
                   top: posY,
-                  zIndex: isDragging ? 9999 : idea.zIndex,
+                  zIndex: isDragging ? 9999 : baseZ,
                   cursor: connectMode ? 'crosshair' : isDragging ? 'grabbing' : 'grab',
                   transition: isDragging ? 'none' : 'box-shadow 0.2s',
                   filter: isDragging
@@ -498,8 +520,8 @@ export default function InfiniteCorkBoard({
                       ? 'drop-shadow(0 0 8px rgba(196, 64, 64, 0.6))'
                       : undefined,
                   outline: isConnectSource ? '3px solid #C44040' : undefined,
-                  outlineOffset: '2px',
-                  borderRadius: '12px',
+                  outlineOffset: isSticker ? undefined : '2px',
+                  borderRadius: isSticker ? undefined : '12px',
                 }}
                 onPointerDown={(e) => handleIdeaPointerDown(e, idea)}
                 onPointerMove={handleIdeaPointerMove}
@@ -614,7 +636,7 @@ export default function InfiniteCorkBoard({
         <button
           type="button"
           onClick={zoomOut}
-          disabled={zoom <= MIN_ZOOM}
+          disabled={zoom <= minZoomRef.current}
           className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface/90 backdrop-blur shadow-md border border-primary/15 text-indigo/60 hover:text-indigo hover:bg-surface transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
           title="Zoom out"
         >
@@ -624,7 +646,7 @@ export default function InfiniteCorkBoard({
 
       {/* Hint for panning */}
       <div className="absolute top-3 left-1/2 -translate-x-1/2 text-xs text-indigo/30 bg-surface/70 backdrop-blur px-3 py-1 rounded-full z-[10000] pointer-events-none">
-        Drag to move cards &middot; Tap cards to edit
+        Drag to move cards &middot; Scroll to zoom &middot; Tap cards to edit
       </div>
     </div>
   );

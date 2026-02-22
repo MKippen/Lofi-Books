@@ -15,6 +15,21 @@ export default function ChapterNotesSidebar({ notes, onChange }: ChapterNotesSid
       <textarea
         value={notes}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          // Prevent Tab from escaping to the sidebar — insert a tab instead
+          if (e.key === 'Tab' && !e.shiftKey) {
+            e.preventDefault();
+            const ta = e.currentTarget;
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            const updated = notes.slice(0, start) + '\t' + notes.slice(end);
+            onChange(updated);
+            // Restore cursor position after React re-renders
+            requestAnimationFrame(() => {
+              ta.selectionStart = ta.selectionEnd = start + 1;
+            });
+          }
+        }}
         placeholder="Write your notes, ideas, and reminders here..."
         className="
           flex-1 w-full px-4 py-3

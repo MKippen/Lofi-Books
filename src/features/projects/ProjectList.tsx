@@ -7,7 +7,7 @@ interface ProjectListProps {
 
 export default function ProjectList({ books }: ProjectListProps) {
   return (
-    <div className="flex flex-wrap justify-center gap-8">
+    <div className="flex flex-wrap justify-center gap-10">
       {books.map((book) => (
         <ProjectCard key={book.id} book={book} />
       ))}

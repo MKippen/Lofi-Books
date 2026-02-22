@@ -87,7 +87,7 @@ export default function HomePage() {
         {/* Content */}
         <div className="w-full max-w-5xl">
           {loading ? (
-            <div className="flex flex-wrap justify-center gap-8">
+            <div className="flex flex-wrap justify-center gap-10">
               <SkeletonBook />
               <SkeletonBook />
               <SkeletonBook />
