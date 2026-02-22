@@ -1,4 +1,5 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
+import { ZoomIn, ZoomOut } from 'lucide-react';
 import { updateIdea, bringToFront, deleteIdea } from '@/hooks/useIdeas';
 import StickyNote from './StickyNote';
 import PolaroidPhoto from './PolaroidPhoto';
@@ -16,6 +17,11 @@ const CARD_HEIGHT = 180;
 // Mini-map dimensions
 const MINIMAP_WIDTH = 200;
 const MINIMAP_HEIGHT = (MINIMAP_WIDTH / CANVAS_WIDTH) * CANVAS_HEIGHT; // keeps aspect ratio
+
+// Zoom limits
+const MIN_ZOOM = 0.3;
+const MAX_ZOOM = 2;
+const ZOOM_STEP = 0.15;
 
 interface InfiniteCorkBoardProps {
   ideas: Idea[];
@@ -57,18 +63,21 @@ export default function InfiniteCorkBoard({
   const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
   const [viewport, setViewport] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1); // keep sync ref for use in callbacks
 
-  // Track scroll position + viewport size for the mini-map
+  // Track scroll position + viewport size for the mini-map (accounting for zoom)
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
     const update = () => {
+      const z = zoomRef.current;
       setViewport({
-        x: container.scrollLeft,
-        y: container.scrollTop,
-        w: container.clientWidth,
-        h: container.clientHeight,
+        x: container.scrollLeft / z,
+        y: container.scrollTop / z,
+        w: container.clientWidth / z,
+        h: container.clientHeight / z,
       });
     };
 
@@ -82,6 +91,49 @@ export default function InfiniteCorkBoard({
       observer.disconnect();
     };
   }, []);
+
+  // Zoom helpers
+  const applyZoom = useCallback((newZoom: number) => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+    const oldZoom = zoomRef.current;
+
+    // Center-of-viewport in canvas coords before zoom change
+    const centerX = (container.scrollLeft + container.clientWidth / 2) / oldZoom;
+    const centerY = (container.scrollTop + container.clientHeight / 2) / oldZoom;
+
+    zoomRef.current = clamped;
+    setZoom(clamped);
+
+    // After React re-renders, adjust scroll so the same canvas point stays centered
+    requestAnimationFrame(() => {
+      container.scrollLeft = centerX * clamped - container.clientWidth / 2;
+      container.scrollTop = centerY * clamped - container.clientHeight / 2;
+    });
+  }, []);
+
+  const zoomIn = useCallback(() => applyZoom(zoomRef.current + ZOOM_STEP), [applyZoom]);
+  const zoomOut = useCallback(() => applyZoom(zoomRef.current - ZOOM_STEP), [applyZoom]);
+  const zoomReset = useCallback(() => applyZoom(1), [applyZoom]);
+
+  // Wheel zoom (pinch on trackpad sends wheel events with ctrlKey)
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = -e.deltaY * 0.01;
+        applyZoom(zoomRef.current + delta);
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [applyZoom]);
 
   const clampX = useCallback(
     (x: number) => Math.max(EDGE_PADDING, Math.min(CANVAS_WIDTH - CARD_WIDTH - EDGE_PADDING, x)),
@@ -120,10 +172,11 @@ export default function InfiniteCorkBoard({
     const drag = dragRef.current;
     if (!drag) return;
 
-    const dx = e.clientX - drag.startX;
-    const dy = e.clientY - drag.startY;
+    const z = zoomRef.current;
+    const dx = (e.clientX - drag.startX) / z;
+    const dy = (e.clientY - drag.startY) / z;
 
-    if (!drag.hasMoved && Math.abs(dx) + Math.abs(dy) > 3) {
+    if (!drag.hasMoved && Math.abs(dx) + Math.abs(dy) > 3 / z) {
       drag.hasMoved = true;
     }
 
@@ -146,8 +199,9 @@ export default function InfiniteCorkBoard({
     target.releasePointerCapture(e.pointerId);
 
     if (drag.hasMoved) {
-      const dx = e.clientX - drag.startX;
-      const dy = e.clientY - drag.startY;
+      const z = zoomRef.current;
+      const dx = (e.clientX - drag.startX) / z;
+      const dy = (e.clientY - drag.startY) / z;
       const newX = clampX(drag.originX + dx);
       const newY = clampY(drag.originY + dy);
 
@@ -209,6 +263,7 @@ export default function InfiniteCorkBoard({
     const container = scrollContainerRef.current;
     if (!container) return;
 
+    // Pan speed should match mouse movement regardless of zoom level
     container.scrollLeft = pan.scrollLeft - (e.clientX - pan.startX);
     container.scrollTop = pan.scrollTop - (e.clientY - pan.startY);
   }, []);
@@ -228,16 +283,20 @@ export default function InfiniteCorkBoard({
     const container = scrollContainerRef.current;
     if (!container) return;
 
+    const z = zoomRef.current;
     const rect = minimapEl.getBoundingClientRect();
     const mx = clientX - rect.left;
     const my = clientY - rect.top;
 
-    // Convert mini-map coords to canvas coords, centering the viewport
-    const canvasX = (mx / MINIMAP_WIDTH) * CANVAS_WIDTH - container.clientWidth / 2;
-    const canvasY = (my / MINIMAP_HEIGHT) * CANVAS_HEIGHT - container.clientHeight / 2;
+    // Convert mini-map coords to canvas coords, then scale by zoom
+    const canvasX = (mx / MINIMAP_WIDTH) * CANVAS_WIDTH * z - container.clientWidth / 2;
+    const canvasY = (my / MINIMAP_HEIGHT) * CANVAS_HEIGHT * z - container.clientHeight / 2;
 
-    container.scrollLeft = Math.max(0, Math.min(CANVAS_WIDTH - container.clientWidth, canvasX));
-    container.scrollTop = Math.max(0, Math.min(CANVAS_HEIGHT - container.clientHeight, canvasY));
+    const maxScrollX = CANVAS_WIDTH * z - container.clientWidth;
+    const maxScrollY = CANVAS_HEIGHT * z - container.clientHeight;
+
+    container.scrollLeft = Math.max(0, Math.min(maxScrollX, canvasX));
+    container.scrollTop = Math.max(0, Math.min(maxScrollY, canvasY));
   }, []);
 
   const handleMinimapPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -296,10 +355,18 @@ export default function InfiniteCorkBoard({
         ref={scrollContainerRef}
         className="w-full h-full overflow-hidden"
       >
+        {/* Spacer that sets scrollable area to match zoomed canvas */}
+        <div style={{ width: CANVAS_WIDTH * zoom, height: CANVAS_HEIGHT * zoom }}>
         {/* Canvas */}
         <div
           className="relative cork-texture"
-          style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, cursor: 'grab' }}
+          style={{
+            width: CANVAS_WIDTH,
+            height: CANVAS_HEIGHT,
+            cursor: 'grab',
+            transform: `scale(${zoom})`,
+            transformOrigin: '0 0',
+          }}
           onPointerDown={handleCanvasPointerDown}
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerUp}
@@ -444,6 +511,7 @@ export default function InfiniteCorkBoard({
             );
           })}
         </div>
+        </div>{/* close spacer */}
       </div>
 
       {/* Mini-map */}
@@ -522,6 +590,36 @@ export default function InfiniteCorkBoard({
         <div className="absolute bottom-0.5 left-1 text-[8px] text-indigo/40 font-semibold pointer-events-none">
           BOARD
         </div>
+      </div>
+
+      {/* Zoom controls */}
+      <div className="absolute bottom-3 left-3 flex flex-col gap-1 z-[10000]">
+        <button
+          type="button"
+          onClick={zoomIn}
+          disabled={zoom >= MAX_ZOOM}
+          className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface/90 backdrop-blur shadow-md border border-primary/15 text-indigo/60 hover:text-indigo hover:bg-surface transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Zoom in"
+        >
+          <ZoomIn size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={zoomReset}
+          className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface/90 backdrop-blur shadow-md border border-primary/15 text-[10px] font-semibold text-indigo/50 hover:text-indigo hover:bg-surface transition-colors cursor-pointer"
+          title="Reset zoom"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          type="button"
+          onClick={zoomOut}
+          disabled={zoom <= MIN_ZOOM}
+          className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface/90 backdrop-blur shadow-md border border-primary/15 text-indigo/60 hover:text-indigo hover:bg-surface transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Zoom out"
+        >
+          <ZoomOut size={16} />
+        </button>
       </div>
 
       {/* Hint for panning */}

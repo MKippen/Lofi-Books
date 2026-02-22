@@ -2,16 +2,13 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import {
-  PublicClientApplication,
   EventType,
   type AuthenticationResult,
 } from '@azure/msal-browser'
 import { MsalProvider } from '@azure/msal-react'
-import { msalConfig } from './auth/msalConfig'
+import { msalInstance } from './auth/msalInstance'
 import App from './App'
 import './index.css'
-
-const msalInstance = new PublicClientApplication(msalConfig);
 
 // Show a loading indicator while MSAL initializes
 const root = ReactDOM.createRoot(document.getElementById('root')!);
@@ -97,4 +94,3 @@ msalInstance
     );
   });
 
-export { msalInstance };

@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useOneDriveBackup } from '@/hooks/useOneDriveBackup';
 import { useAuth } from '@/hooks/useAuth';
-import { checkHasData, getRemoteMetadata, restoreFromBackup } from '@/api/backup';
+import { checkHasData, getRemoteMetadata, restoreFromBackup, hasLegacyDexieData, readLegacyDexieData, importLocalData, deleteLegacyDexieDB } from '@/api/backup';
 import { notifyChange } from '@/api/notify';
 import type { BackupState } from '@/types';
 import type { RemoteMetadata } from '@/api/backup';
@@ -42,9 +42,12 @@ export default function BackupProvider({ children }: BackupProviderProps) {
   const [isRestoring, setIsRestoring] = useState(false);
   const [checkedFirstLoad, setCheckedFirstLoad] = useState(false);
 
-  // First-load restore check: if DB is empty and OneDrive has a backup, prompt
+  // First-load restore check:
+  // 1. If user has server data, skip
+  // 2. If old Dexie/IndexedDB data exists in browser, auto-migrate it
+  // 3. Otherwise, if OneDrive has a backup, prompt restore dialog
   useEffect(() => {
-    if (!isAuthenticated || !isOneDriveConnected || checkedFirstLoad) return;
+    if (!isAuthenticated || checkedFirstLoad) return;
 
     let cancelled = false;
 
@@ -52,6 +55,39 @@ export default function BackupProvider({ children }: BackupProviderProps) {
       try {
         const { hasData } = await checkHasData();
         if (hasData) {
+          // User already has data — clean up old Dexie DB if present
+          try {
+            if (await hasLegacyDexieData()) {
+              await deleteLegacyDexieDB();
+              console.log('Cleaned up old MoBookDB IndexedDB');
+            }
+          } catch { /* ignore */ }
+          setCheckedFirstLoad(true);
+          return;
+        }
+
+        // No server data — check for old Dexie data in this browser first
+        try {
+          if (await hasLegacyDexieData()) {
+            const legacyData = await readLegacyDexieData();
+            if (legacyData && Array.isArray(legacyData.books) && legacyData.books.length > 0) {
+              console.log('Found legacy Dexie data, migrating to server...', {
+                books: legacyData.books.length,
+              });
+              await importLocalData(legacyData);
+              await deleteLegacyDexieDB();
+              console.log('Legacy Dexie migration complete');
+              if (!cancelled) notifyChange();
+              setCheckedFirstLoad(true);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('Dexie migration check failed:', err);
+        }
+
+        // No Dexie data — check OneDrive
+        if (!isOneDriveConnected) {
           setCheckedFirstLoad(true);
           return;
         }

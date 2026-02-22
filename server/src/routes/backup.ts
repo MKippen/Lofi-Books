@@ -34,6 +34,7 @@ let lastBackupTime: string | null = null;
 let lastBackupError: string | null = null;
 let backupInProgress = false;
 let lastAccessToken: string | null = null;
+let lastUserId: string | null = null;
 let mutationDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Get backup status
@@ -46,9 +47,10 @@ backupRouter.get('/status', (_req, res) => {
   });
 });
 
-// Check if database has any data (used for first-load restore prompt)
-backupRouter.get('/has-data', (_req, res) => {
-  const row = db.prepare('SELECT COUNT(*) as count FROM books').get() as { count: number };
+// Check if the current user has any data (used for first-load restore prompt)
+backupRouter.get('/has-data', (req, res) => {
+  const userId = (req as any).userId as string;
+  const row = db.prepare('SELECT COUNT(*) as count FROM books WHERE user_id = ?').get(userId) as { count: number };
   res.json({ hasData: row.count > 0, bookCount: row.count });
 });
 
@@ -74,6 +76,7 @@ backupRouter.post('/token', (req, res) => {
   const { accessToken } = req.body;
   if (!accessToken) return res.status(400).json({ error: 'Missing accessToken' });
   lastAccessToken = accessToken;
+  lastUserId = (req as any).userId as string || '';
   res.json({ ok: true });
 });
 
@@ -85,9 +88,11 @@ backupRouter.post('/trigger', async (req, res) => {
   if (backupInProgress) return res.json({ ok: true, message: 'Backup already in progress' });
 
   try {
+    const userId = (req as any).userId as string || '';
     backupInProgress = true;
     lastAccessToken = token;
-    await performBackup(token);
+    lastUserId = userId;
+    await performBackup(token, userId);
     res.json({ ok: true, lastBackupTime });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -99,10 +104,12 @@ backupRouter.post('/trigger', async (req, res) => {
 });
 
 // Notify server of a data mutation (triggers debounced backup)
-backupRouter.post('/notify-mutation', (_req, res) => {
+backupRouter.post('/notify-mutation', (req, res) => {
   if (!lastAccessToken) {
     return res.json({ ok: true, message: 'No token, skipping' });
   }
+
+  const userId = (req as any).userId as string || lastUserId || '';
 
   if (mutationDebounceTimer) {
     clearTimeout(mutationDebounceTimer);
@@ -112,7 +119,7 @@ backupRouter.post('/notify-mutation', (_req, res) => {
     if (lastAccessToken && !backupInProgress) {
       try {
         backupInProgress = true;
-        await performBackup(lastAccessToken);
+        await performBackup(lastAccessToken, userId);
         console.log('Mutation-triggered backup completed at', lastBackupTime);
       } catch (err) {
         console.error('Mutation-triggered backup failed:', err);
@@ -126,15 +133,92 @@ backupRouter.post('/notify-mutation', (_req, res) => {
   res.json({ ok: true });
 });
 
+// List available backup files on OneDrive
+backupRouter.get('/list', async (_req, res) => {
+  if (!lastAccessToken) return res.json([]);
+  try {
+    const response = await graphFetch(
+      lastAccessToken,
+      `/me/drive/root:/${BACKUP_FOLDER}:/children?$orderby=lastModifiedDateTime desc`,
+    );
+    const data = await response.json();
+    interface DriveItem { name: string; size: number; lastModifiedDateTime: string }
+    const backups = (data.value as DriveItem[])
+      .filter((item: DriveItem) => item.name.startsWith('backup-') && item.name.endsWith('.json') && item.name !== 'backup-meta.json')
+      .map((item: DriveItem) => ({
+        name: item.name,
+        size: item.size,
+        lastModified: item.lastModifiedDateTime,
+      }));
+    // Also include latest-backup.json
+    const latest = (data.value as DriveItem[]).find((item: DriveItem) => item.name === 'latest-backup.json');
+    if (latest) {
+      backups.unshift({ name: latest.name, size: latest.size, lastModified: latest.lastModifiedDateTime });
+    }
+    res.json(backups);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Import data from client-side (e.g., old Dexie/IndexedDB migration)
+backupRouter.post('/import-local', (req, res) => {
+  const userId = (req as any).userId as string;
+  if (!userId) return res.status(400).json({ error: 'No user ID' });
+
+  const data = req.body;
+
+  // Validate structure
+  const requiredKeys = ['books', 'characters', 'chapters', 'ideas',
+    'timelineEvents', 'wishlistItems', 'images'];
+  for (const key of requiredKeys) {
+    if (!Array.isArray(data[key])) {
+      return res.status(400).json({ error: `Invalid data: missing ${key}` });
+    }
+  }
+  if (!Array.isArray(data.connections)) data.connections = [];
+  if (!Array.isArray(data.chapterIllustrations)) data.chapterIllustrations = [];
+
+  console.log('Import-local: importing data for user', userId, '—', {
+    books: data.books.length,
+    characters: data.characters.length,
+    chapters: data.chapters.length,
+    ideas: data.ideas.length,
+    timelineEvents: data.timelineEvents.length,
+    wishlistItems: data.wishlistItems.length,
+    images: data.images.length,
+  });
+
+  try {
+    importAllData(data, userId);
+    const result = {
+      ok: true,
+      bookCount: data.books.length,
+      totalRecords: data.books.length + data.characters.length +
+        data.chapters.length + data.ideas.length +
+        data.timelineEvents.length + data.wishlistItems.length,
+    };
+    console.log('Import-local: success', result);
+    res.json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('Import-local: failed —', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 // Restore from OneDrive backup
 backupRouter.post('/restore', async (req, res) => {
+  const userId = (req as any).userId as string;
   const token = req.body.accessToken || lastAccessToken;
   if (!token) return res.status(400).json({ error: 'No access token available' });
+  const filename = req.body.filename || 'latest-backup.json';
 
   try {
     const response = await graphFetch(
       token,
-      `/me/drive/root:/${BACKUP_FOLDER}/latest-backup.json:/content`,
+      `/me/drive/root:/${BACKUP_FOLDER}/${filename}:/content`,
     );
     const data = await response.json();
 
@@ -150,7 +234,7 @@ backupRouter.post('/restore', async (req, res) => {
     if (!Array.isArray(data.connections)) data.connections = [];
     if (!Array.isArray(data.chapterIllustrations)) data.chapterIllustrations = [];
 
-    console.log('Restore: importing data —', {
+    console.log('Restore: importing data for user', userId, '—', {
       books: data.books.length,
       characters: data.characters.length,
       chapters: data.chapters.length,
@@ -160,12 +244,7 @@ backupRouter.post('/restore', async (req, res) => {
       images: data.images.length,
     });
 
-    // Log a sample book row to debug key format
-    if (data.books.length > 0) {
-      console.log('Restore: sample book keys:', Object.keys(data.books[0]));
-    }
-
-    importAllData(data);
+    importAllData(data, userId);
 
     lastAccessToken = token;
     lastBackupTime = new Date().toISOString();
@@ -189,8 +268,8 @@ backupRouter.post('/restore', async (req, res) => {
 
 // --- Backup logic ---
 
-async function performBackup(accessToken: string) {
-  const data = exportAllData();
+async function performBackup(accessToken: string, userId: string = '') {
+  const data = userId ? exportUserData(userId) : exportAllData();
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
 
   await ensureBackupFolder(accessToken);
@@ -224,6 +303,7 @@ async function performBackup(accessToken: string) {
 }
 
 function exportAllData() {
+  // Export all data (for OneDrive backup — scoped per-user via OneDrive account)
   return {
     books: db.prepare('SELECT * FROM books').all(),
     characters: db.prepare('SELECT * FROM characters').all(),
@@ -237,29 +317,74 @@ function exportAllData() {
   };
 }
 
-function importAllData(data: ReturnType<typeof exportAllData>) {
+function exportUserData(userId: string) {
+  const bookIds = db.prepare('SELECT id FROM books WHERE user_id = ?').all(userId) as { id: string }[];
+  const bookIdList = bookIds.map(b => b.id);
+
+  if (bookIdList.length === 0) {
+    return {
+      books: [],
+      characters: [],
+      chapters: [],
+      ideas: [],
+      connections: [],
+      chapterIllustrations: [],
+      timelineEvents: [],
+      wishlistItems: db.prepare('SELECT * FROM wishlist_items WHERE user_id = ?').all(userId),
+      images: [],
+    };
+  }
+
+  const placeholders = bookIdList.map(() => '?').join(',');
+  return {
+    books: db.prepare(`SELECT * FROM books WHERE user_id = ?`).all(userId),
+    characters: db.prepare(`SELECT * FROM characters WHERE book_id IN (${placeholders})`).all(...bookIdList),
+    chapters: db.prepare(`SELECT * FROM chapters WHERE book_id IN (${placeholders})`).all(...bookIdList),
+    ideas: db.prepare(`SELECT * FROM ideas WHERE book_id IN (${placeholders})`).all(...bookIdList),
+    connections: db.prepare(`SELECT * FROM connections WHERE book_id IN (${placeholders})`).all(...bookIdList),
+    chapterIllustrations: db.prepare(`SELECT * FROM chapter_illustrations WHERE book_id IN (${placeholders})`).all(...bookIdList),
+    timelineEvents: db.prepare(`SELECT * FROM timeline_events WHERE book_id IN (${placeholders})`).all(...bookIdList),
+    wishlistItems: db.prepare(`SELECT * FROM wishlist_items WHERE user_id = ?`).all(userId),
+    images: db.prepare(`SELECT * FROM images WHERE book_id IN (${placeholders})`).all(...bookIdList),
+  };
+}
+
+function importAllData(data: ReturnType<typeof exportAllData>, userId: string) {
   const restore = db.transaction(() => {
     db.pragma('foreign_keys = OFF');
 
-    // Clear all tables
-    const tables = [
-      'images', 'chapter_illustrations', 'connections', 'timeline_events', 'wishlist_items',
-      'ideas', 'chapters', 'characters', 'books',
-    ];
-    for (const table of tables) {
-      db.prepare(`DELETE FROM ${table}`).run();
+    // Find all book IDs belonging to this user (to scope cascade deletes)
+    const existingBookIds = (db.prepare('SELECT id FROM books WHERE user_id = ?').all(userId) as { id: string }[]).map(b => b.id);
+
+    if (existingBookIds.length > 0) {
+      const ph = existingBookIds.map(() => '?').join(',');
+      // Clear child tables for this user's books
+      db.prepare(`DELETE FROM images WHERE book_id IN (${ph})`).run(...existingBookIds);
+      db.prepare(`DELETE FROM chapter_illustrations WHERE book_id IN (${ph})`).run(...existingBookIds);
+      db.prepare(`DELETE FROM connections WHERE book_id IN (${ph})`).run(...existingBookIds);
+      db.prepare(`DELETE FROM timeline_events WHERE book_id IN (${ph})`).run(...existingBookIds);
+      db.prepare(`DELETE FROM ideas WHERE book_id IN (${ph})`).run(...existingBookIds);
+      db.prepare(`DELETE FROM chapters WHERE book_id IN (${ph})`).run(...existingBookIds);
+      db.prepare(`DELETE FROM characters WHERE book_id IN (${ph})`).run(...existingBookIds);
     }
+    // Clear this user's books and wishlist
+    db.prepare('DELETE FROM books WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM wishlist_items WHERE user_id = ?').run(userId);
 
     // Normalize rows: convert camelCase keys to snake_case (handles old Dexie backups)
     const normalize = (rows: unknown[]) =>
       rows.map((row) => toSnakeKeys(row as Record<string, unknown>));
 
-    // Insert books
+    // Insert books (stamp with current user_id)
     const insertBook = db.prepare(`
-      INSERT INTO books (id, title, description, cover_image_id, genre, created_at, updated_at)
-      VALUES (@id, @title, @description, @cover_image_id, @genre, @created_at, @updated_at)
+      INSERT INTO books (id, title, description, cover_image_id, genre, user_id, created_at, updated_at)
+      VALUES (@id, @title, @description, @cover_image_id, @genre, @user_id, @created_at, @updated_at)
     `);
-    for (const row of normalize(data.books)) insertBook.run(row);
+    for (const row of normalize(data.books)) {
+      const r = row as Record<string, unknown>;
+      r.user_id = userId; // Always stamp with current user
+      insertBook.run(r);
+    }
 
     // Insert characters
     const insertChar = db.prepare(`
@@ -315,12 +440,16 @@ function importAllData(data: ReturnType<typeof exportAllData>) {
       insertEvent.run(r);
     }
 
-    // Insert wishlist items
+    // Insert wishlist items (stamp with current user_id)
     const insertWishlist = db.prepare(`
-      INSERT INTO wishlist_items (id, title, description, type, status, created_at, updated_at)
-      VALUES (@id, @title, @description, @type, @status, @created_at, @updated_at)
+      INSERT INTO wishlist_items (id, title, description, type, status, user_id, created_at, updated_at)
+      VALUES (@id, @title, @description, @type, @status, @user_id, @created_at, @updated_at)
     `);
-    for (const row of normalize(data.wishlistItems)) insertWishlist.run(row);
+    for (const row of normalize(data.wishlistItems)) {
+      const r = row as Record<string, unknown>;
+      r.user_id = userId;
+      insertWishlist.run(r);
+    }
 
     // Insert images (metadata only)
     const insertImage = db.prepare(`
@@ -432,10 +561,10 @@ async function rotateBackups(accessToken: string) {
 
 // Periodic backup every 5 minutes (safety net, if token is available)
 setInterval(async () => {
-  if (lastAccessToken && !backupInProgress) {
+  if (lastAccessToken && !backupInProgress && lastUserId) {
     try {
       backupInProgress = true;
-      await performBackup(lastAccessToken);
+      await performBackup(lastAccessToken, lastUserId);
       console.log('Periodic backup completed at', lastBackupTime);
     } catch (err) {
       console.error('Periodic backup failed:', err);

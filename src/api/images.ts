@@ -1,4 +1,4 @@
-import { apiUrl } from './client';
+import { apiUrl, getUserId } from './client';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api';
 
@@ -16,6 +16,7 @@ export async function uploadImage(bookId: string, file: File): Promise<string> {
   const response = await fetch(`${BASE}/images/upload/${bookId}`, {
     method: 'POST',
     body: formData,
+    headers: { 'X-User-Id': getUserId() },
     // Don't set Content-Type — browser sets it with boundary for multipart
   });
 
@@ -31,5 +32,5 @@ export async function uploadImage(bookId: string, file: File): Promise<string> {
 /** Delete an image by ID. */
 export async function deleteImageApi(id: string): Promise<void> {
   const url = apiUrl(`/images/${id}`);
-  await fetch(url, { method: 'DELETE' });
+  await fetch(url, { method: 'DELETE', headers: { 'X-User-Id': getUserId() } });
 }

@@ -1,6 +1,10 @@
 import { apiFetch } from './client';
 import type { Book } from '@/types';
 
+export async function claimOrphanedBooks(): Promise<void> {
+  await apiFetch('/books/claim-orphaned', { method: 'POST' });
+}
+
 export async function listBooks(): Promise<Book[]> {
   return apiFetch<Book[]>('/books');
 }

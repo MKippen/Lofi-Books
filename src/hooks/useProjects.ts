@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { subscribe, notifyChange } from '@/api/notify';
-import { listBooks, getBook, createBookApi, updateBookApi, deleteBookApi } from '@/api/books';
+import { claimOrphanedBooks, listBooks, getBook, createBookApi, updateBookApi, deleteBookApi } from '@/api/books';
 import type { Book } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -18,7 +18,8 @@ export function useBooks() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    // Claim any orphaned books from before user-isolation was added, then load
+    claimOrphanedBooks().catch(() => {}).then(refresh);
     const unsubscribe = subscribe(refresh);
     return unsubscribe;
   }, [refresh]);

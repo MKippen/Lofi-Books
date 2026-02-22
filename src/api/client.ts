@@ -1,4 +1,12 @@
+import { msalInstance } from '@/auth/msalInstance';
+
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api';
+
+/** Get the current user's unique ID from MSAL (Azure AD OID). */
+function getUserId(): string {
+  const account = msalInstance.getActiveAccount();
+  return account?.localAccountId ?? '';
+}
 
 export async function apiFetch<T = unknown>(
   path: string,
@@ -8,6 +16,7 @@ export async function apiFetch<T = unknown>(
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      'X-User-Id': getUserId(),
       ...options.headers,
     },
   });
@@ -23,3 +32,6 @@ export async function apiFetch<T = unknown>(
 export function apiUrl(path: string): string {
   return `${BASE}${path}`;
 }
+
+/** Get the current user's ID for use in non-apiFetch contexts (e.g., image uploads). */
+export { getUserId };

@@ -14,6 +14,7 @@ const ChaptersPage = React.lazy(() => import('./pages/ChaptersPage'))
 const ChapterEditor = React.lazy(() => import('./pages/ChapterEditor'))
 const ReaderPage = React.lazy(() => import('./pages/ReaderPage'))
 const WishlistPage = React.lazy(() => import('./pages/WishlistPage'))
+const WritingToolsPage = React.lazy(() => import('./pages/WritingToolsPage'))
 const SettingsPage = React.lazy(() => import('./pages/SettingsPage'))
 
 function LoadingSpinner() {
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="chapters/:chapterId" element={<ChapterEditor />} />
               <Route path="read" element={<ReaderPage />} />
               <Route path="wishlist" element={<WishlistPage />} />
+              <Route path="tools" element={<WritingToolsPage />} />
             </Route>
           </Routes>
         </Suspense>

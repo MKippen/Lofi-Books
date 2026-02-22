@@ -17,6 +17,12 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Extract user ID from X-User-Id header and attach to request
+app.use((req, _res, next) => {
+  (req as any).userId = req.headers['x-user-id'] as string || '';
+  next();
+});
+
 // Routes
 app.use('/api/books', booksRouter);
 app.use('/api/characters', charactersRouter);

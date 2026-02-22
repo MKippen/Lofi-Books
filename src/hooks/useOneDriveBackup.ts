@@ -90,14 +90,7 @@ export function useOneDriveBackup() {
 
     const initialize = async () => {
       await sendTokenToServer();
-      // Trigger initial backup after registering token
-      try {
-        const token = await getAccessToken();
-        await triggerBackup(token);
-        await pollStatus();
-      } catch (err) {
-        console.error('Initial backup failed:', err);
-      }
+      await pollStatus();
     };
 
     initialize();

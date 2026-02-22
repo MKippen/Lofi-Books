@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   Star,
   Settings,
+  Wrench,
 } from 'lucide-react'
 
 const navItems = [
@@ -22,9 +23,6 @@ const navItems = [
   { label: 'Read Book', icon: BookOpen, path: '/read' },
 ]
 
-const extraNavItems = [
-  { label: 'Wish List', icon: Star, path: '/wishlist' },
-]
 
 export default function Sidebar() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -106,57 +104,60 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Extra nav — Wish List */}
-      <div className="relative mx-4 mb-1 mt-1 flex items-center gap-2">
-        <div className="flex-1 border-t border-white/[0.06]" />
-        <span className="text-[10px] opacity-20">&#9734;</span>
-        <div className="flex-1 border-t border-white/[0.06]" />
-      </div>
-      <nav className="relative px-3 pb-2">
-        {extraNavItems.map(({ label, icon: Icon, path }) => (
-          <NavLink
-            key={label}
-            to={`${basePath}${path}`}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm transition-all duration-200 ${
-                isActive
-                  ? 'bg-warning/15 font-semibold text-warning shadow-sm'
-                  : 'text-white/40 hover:bg-white/[0.06] hover:text-white/70'
-              }`
-            }
-          >
-            <Icon className="h-5 w-5" />
-            <span>{label}</span>
-          </NavLink>
-        ))}
-      </nav>
-
-      {/* Decorative plant at the bottom */}
-      <div className="relative px-4 pb-2">
+      {/* Decorative plant */}
+      <div className="relative px-4">
         <div className="flex items-end justify-center gap-0.5 py-3 opacity-40">
-          {/* Plant pot */}
           <svg width="60" height="65" viewBox="0 0 60 65" fill="none" xmlns="http://www.w3.org/2000/svg">
-            {/* Leaves */}
             <ellipse cx="30" cy="18" rx="6" ry="14" fill="#5A8A4A" transform="rotate(-10 30 18)" opacity="0.7"/>
             <ellipse cx="22" cy="22" rx="5" ry="12" fill="#4A7A3A" transform="rotate(-30 22 22)" opacity="0.6"/>
             <ellipse cx="38" cy="20" rx="5" ry="13" fill="#6A9A5A" transform="rotate(15 38 20)" opacity="0.65"/>
             <ellipse cx="16" cy="28" rx="4" ry="10" fill="#3A6A2A" transform="rotate(-50 16 28)" opacity="0.5"/>
             <ellipse cx="42" cy="26" rx="4.5" ry="11" fill="#5A8A4A" transform="rotate(35 42 26)" opacity="0.55"/>
-            {/* Stem lines */}
             <line x1="30" y1="38" x2="30" y2="28" stroke="#4A7A3A" strokeWidth="1.5" opacity="0.4"/>
             <line x1="30" y1="38" x2="22" y2="25" stroke="#4A7A3A" strokeWidth="1" opacity="0.3"/>
             <line x1="30" y1="38" x2="38" y2="24" stroke="#4A7A3A" strokeWidth="1" opacity="0.3"/>
-            {/* Pot */}
             <path d="M20 40 L18 55 C18 58 22 60 30 60 C38 60 42 58 42 55 L40 40 Z" fill="#8B6B52" opacity="0.6"/>
             <rect x="18" y="38" width="24" height="4" rx="1" fill="#9B7B62" opacity="0.6"/>
-            {/* Pot detail line */}
             <path d="M22 48 Q30 50 38 48" stroke="#7A5B42" strokeWidth="0.8" fill="none" opacity="0.3"/>
           </svg>
         </div>
       </div>
 
-      {/* Settings + Back to books */}
-      <div className="relative px-3 pb-6 space-y-0.5">
+      {/* Divider with star */}
+      <div className="relative mx-4 mb-1 flex items-center gap-2">
+        <div className="flex-1 border-t border-white/[0.06]" />
+        <span className="text-[10px] opacity-20">&#9734;</span>
+        <div className="flex-1 border-t border-white/[0.06]" />
+      </div>
+
+      {/* Extra nav — Writing Tools, Wish List, Settings, Back */}
+      <nav className="relative px-3 pb-6 space-y-0.5">
+        <NavLink
+          to={`${basePath}/tools`}
+          className={({ isActive }) =>
+            `flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm transition-all duration-200 ${
+              isActive
+                ? 'bg-accent/15 font-semibold text-accent shadow-sm'
+                : 'text-white/40 hover:bg-white/[0.06] hover:text-white/70'
+            }`
+          }
+        >
+          <Wrench className="h-5 w-5" />
+          <span>Writing Tools</span>
+        </NavLink>
+        <NavLink
+          to={`${basePath}/wishlist`}
+          className={({ isActive }) =>
+            `flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm transition-all duration-200 ${
+              isActive
+                ? 'bg-warning/15 font-semibold text-warning shadow-sm'
+                : 'text-white/40 hover:bg-white/[0.06] hover:text-white/70'
+            }`
+          }
+        >
+          <Star className="h-5 w-5" />
+          <span>Wish List</span>
+        </NavLink>
         <NavLink
           to="/settings"
           className="flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm text-white/30 transition-all hover:bg-white/[0.06] hover:text-white/70"
@@ -171,7 +172,7 @@ export default function Sidebar() {
           <ArrowLeft className="h-5 w-5" />
           <span>Back to Books</span>
         </NavLink>
-      </div>
+      </nav>
     </aside>
   )
 }

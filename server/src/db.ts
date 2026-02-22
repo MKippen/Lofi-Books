@@ -136,4 +136,16 @@ try {
   // Column already exists
 }
 
+// Migration: add user_id to books and wishlist_items for per-user data isolation
+try {
+  db.exec(`ALTER TABLE books ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`);
+} catch {
+  // Column already exists
+}
+try {
+  db.exec(`ALTER TABLE wishlist_items ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`);
+} catch {
+  // Column already exists
+}
+
 export { db, IMAGES_DIR, DATA_DIR };

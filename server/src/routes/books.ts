@@ -5,43 +5,48 @@ import { toCamel, toCamelArray, camelToSnake } from '../util.js';
 
 export const booksRouter = Router();
 
-// List all books
-booksRouter.get('/', (_req, res) => {
-  const books = db.prepare('SELECT * FROM books ORDER BY created_at DESC').all();
+// List books for the current user
+booksRouter.get('/', (req, res) => {
+  const userId = (req as any).userId as string;
+  const books = db.prepare('SELECT * FROM books WHERE user_id = ? ORDER BY created_at DESC').all(userId);
   res.json(toCamelArray(books as Record<string, unknown>[]));
 });
 
-// Get single book
+// Get single book (must belong to current user)
 booksRouter.get('/:id', (req, res) => {
-  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(req.params.id);
+  const userId = (req as any).userId as string;
+  const book = db.prepare('SELECT * FROM books WHERE id = ? AND user_id = ?').get(req.params.id, userId);
   if (!book) return res.status(404).json({ error: 'Book not found' });
   res.json(toCamel(book as Record<string, unknown>));
 });
 
 // Create book
 booksRouter.post('/', (req, res) => {
+  const userId = (req as any).userId as string;
   const id = uuid();
   const now = new Date().toISOString();
   const { title, description = '', coverImageId = null, genre = '' } = req.body;
 
   db.prepare(`
-    INSERT INTO books (id, title, description, cover_image_id, genre, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, title, description, coverImageId, genre, now, now);
+    INSERT INTO books (id, title, description, cover_image_id, genre, user_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, title, description, coverImageId, genre, userId, now, now);
 
   res.status(201).json({ id });
 });
 
-// Update book
+// Update book (must belong to current user)
 booksRouter.put('/:id', (req, res) => {
+  const userId = (req as any).userId as string;
   const now = new Date().toISOString();
-  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(req.params.id);
+  const book = db.prepare('SELECT * FROM books WHERE id = ? AND user_id = ?').get(req.params.id, userId);
   if (!book) return res.status(404).json({ error: 'Book not found' });
 
   const fields: string[] = [];
   const values: unknown[] = [];
 
   for (const [key, value] of Object.entries(req.body)) {
+    if (key === 'userId') continue; // Don't allow changing owner
     const col = camelToSnake(key);
     fields.push(`${col} = ?`);
     values.push(value);
@@ -54,10 +59,24 @@ booksRouter.put('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// Delete book (cascade handled by foreign keys)
+// Delete book (must belong to current user, cascade handled by foreign keys)
 booksRouter.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM books WHERE id = ?').run(req.params.id);
+  const userId = (req as any).userId as string;
+  db.prepare('DELETE FROM books WHERE id = ? AND user_id = ?').run(req.params.id, userId);
   res.json({ ok: true });
+});
+
+// Claim any orphaned books (user_id = '') for the current user — one-time migration helper
+booksRouter.post('/claim-orphaned', (req, res) => {
+  const userId = (req as any).userId as string;
+  if (!userId) return res.status(400).json({ error: 'No user ID' });
+
+  const orphaned = db.prepare("SELECT COUNT(*) as count FROM books WHERE user_id = ''").get() as { count: number };
+  if (orphaned.count === 0) return res.json({ claimed: 0 });
+
+  db.prepare("UPDATE books SET user_id = ? WHERE user_id = ''").run(userId);
+  db.prepare("UPDATE wishlist_items SET user_id = ? WHERE user_id = ''").run(userId);
+  res.json({ claimed: orphaned.count });
 });
 
 // --- Nested routes for book children ---
