@@ -13,8 +13,7 @@ function attr(tag: string, name: string): string | null {
 }
 
 /**
- * Replace <illustration-embed> custom elements with styled illustration cards
- * for the reader view. These are embedded by the chapter editor.
+ * Replace <illustration-embed> custom elements with styled illustration cards.
  */
 function renderIllustrations(html: string): string {
   return html.replace(
@@ -30,7 +29,8 @@ function renderIllustrations(html: string): string {
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"');
-      return `<div class="illustration-reader-card" style="height:${h}px">
+      // max-height prevents illustration from exceeding the column height
+      return `<div class="illustration-reader-card" style="height:${h}px;max-height:calc(100% - 2rem)">
         <img src="${IMG_BASE}/images/${imageId}" alt="${decodedCaption}" style="object-position:center ${fy}%" />
         ${decodedCaption ? `<div class="illustration-caption">${decodedCaption}</div>` : ''}
       </div>`;
@@ -38,10 +38,7 @@ function renderIllustrations(html: string): string {
   );
 }
 
-/**
- * Build the chapter title header as an HTML string so it flows inside the
- * CSS column layout (appears at the top of the left/first column).
- */
+/** Build chapter title as inline HTML. */
 function buildChapterTitleHTML(title: string): string {
   return `<div class="reader-chapter-header" style="break-inside:avoid;margin-bottom:1.5rem;text-align:center">
     <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem">
@@ -61,16 +58,11 @@ function buildChapterTitleHTML(title: string): string {
 /** Small portrait circle for a single character. */
 function CharacterPortrait({ character }: { character: Character }) {
   const { url } = useImage(character.mainImageId);
-
   return (
     <div className="flex flex-col items-center gap-1">
       <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-primary/20 bg-primary/5 flex-shrink-0">
         {url ? (
-          <img
-            src={url}
-            alt={character.name}
-            className="w-full h-full object-cover"
-          />
+          <img src={url} alt={character.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-primary/40 text-xs font-bold">
             {character.name.charAt(0)}
@@ -84,8 +76,9 @@ function CharacterPortrait({ character }: { character: Character }) {
   );
 }
 
+// ─── Props ────────────────────────────────────────────────────────────────────
+
 interface BookPageProps {
-  /** Full chapter HTML content */
   content: string;
   chapterTitle: string | null;
   showCharacterPortraits: boolean;
@@ -93,15 +86,17 @@ interface BookPageProps {
   chapterContext?: ChapterContext | null;
   fontSize?: number;
   fontCss?: string;
-  /** Number of CSS columns (1 = single page, 2 = two-page spread) */
+  /** 1 = single page, 2 = two-page spread */
   columnCount?: number;
   /** Gap between columns in px */
   columnGap?: number;
-  /** Current "spread" index (0-based). Each spread shows `columnCount` columns. */
+  /** Current spread index (0-based) */
   spreadIndex: number;
-  /** Callback: total number of spreads changed after layout */
+  /** Called when the total number of spreads changes after layout */
   onTotalSpreadsChange?: (total: number) => void;
 }
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BookPage({
   content,
@@ -116,152 +111,209 @@ export default function BookPage({
   spreadIndex,
   onTotalSpreadsChange,
 }: BookPageProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const clipRef = useRef<HTMLDivElement>(null);
-  /** Measured width of the clip wrapper — one "spread" is exactly this wide. */
-  const [clipWidth, setClipWidth] = useState(0);
 
-  // Find mentioned characters for portraits
+  /** Computed single-page/column width in px */
+  const [pageW, setPageW] = useState(0);
+
+  // ── Mentioned characters for portraits ──
   const mentionedCharacters = useMemo(() => {
     if (!showCharacterPortraits || characters.length === 0) return [];
     const plainText = content.replace(/<[^>]*>/g, '').toLowerCase();
     return characters.filter((c) => plainText.includes(c.name.toLowerCase()));
   }, [content, characters, showCharacterPortraits]);
 
-  // Build full HTML: chapter title (inline at top) + content
+  // ── Build full HTML: chapter title + content with illustrations ──
   const fullHTML = useMemo(() => {
     const titleHTML = chapterTitle ? buildChapterTitleHTML(chapterTitle) : '';
     return titleHTML + renderIllustrations(content);
   }, [chapterTitle, content]);
 
-  // Compute the exact column width so that `columnCount` columns + gaps = clipWidth.
-  // e.g. 2 columns with 48px gap in 1000px container: colW = (1000 - 48) / 2 = 476px
-  const colW = clipWidth > 0
-    ? Math.floor((clipWidth - columnGap * (columnCount - 1)) / columnCount)
-    : 0;
-
-  // Measure the clip wrapper and recompute spreads whenever layout changes.
-  const measure = useCallback(() => {
-    const clip = clipRef.current;
-    const el = contentRef.current;
-    if (!clip || !el) return;
-
-    const w = clip.clientWidth;
+  // ── Compute page width from scroll container dimensions ──
+  const updateDimensions = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const w = el.clientWidth;
     if (w <= 0) return;
-    setClipWidth(w);
+    // Each column is: (containerWidth - totalGaps) / columnCount
+    // For 2 columns: (w - 48) / 2 ≈ each column width
+    const pw = columnCount >= 2
+      ? Math.floor((w - columnGap) / columnCount)
+      : w;
+    setPageW(pw);
+  }, [columnCount, columnGap]);
 
-    // Wait for browser to re-layout with the correct column-width
+  // ── Count total spreads from scrollWidth ──
+  const remeasure = useCallback(() => {
+    // Double-rAF ensures the browser has finished layout and paint
     requestAnimationFrame(() => {
-      // scrollWidth = total width of all columns + gaps
-      const scrollW = el.scrollWidth;
-      // Each spread = clipWidth (columnCount columns + gaps between them)
-      // Between spreads there's also a columnGap, so total =
-      //   numSpreads * (columnCount * colW + (columnCount-1) * gap) + (numSpreads-1) * gap
-      // But since we set width = large number, the browser just lays out columns sequentially.
-      // The simplest: count total columns = scrollW / (colW + gap), then spreads = ceil(totalCols / columnCount)
-      const cw = Math.floor((w - columnGap * (columnCount - 1)) / columnCount);
-      if (cw <= 0) return;
-      const totalCols = Math.max(1, Math.round(scrollW / (cw + columnGap)));
-      const spreads = Math.max(1, Math.ceil(totalCols / columnCount));
-      onTotalSpreadsChange?.(spreads);
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (!el || pageW <= 0) return;
+
+        const viewW = el.clientWidth;
+        if (viewW <= 0) return;
+
+        // Total spreads = how many full viewports fit in the scroll width.
+        // Use a small tolerance (2px) to avoid rounding errors creating an
+        // extra empty spread when scrollWidth ≈ clientWidth.
+        const total = Math.max(1, Math.ceil((el.scrollWidth - 2) / viewW));
+        onTotalSpreadsChange?.(total);
+      });
     });
-  }, [columnCount, columnGap, onTotalSpreadsChange]);
+  }, [pageW, columnGap, columnCount, onTotalSpreadsChange]);
 
-  // Measure on mount, content/font/layout change
+  // ── ResizeObserver: recalculate dimensions on any resize ──
   useEffect(() => {
-    measure();
-    const t1 = setTimeout(measure, 80);
-    const t2 = setTimeout(measure, 250);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [content, fontSize, fontCss, columnCount, columnGap, measure]);
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      updateDimensions();
+    });
+    ro.observe(el);
+    updateDimensions(); // initial
+    return () => ro.disconnect();
+  }, [updateDimensions]);
 
-  // Measure on resize
+  // ── Remeasure when pageW, content, or font changes ──
   useEffect(() => {
-    const handleResize = () => measure();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [measure]);
+    if (pageW <= 0) return;
+    remeasure();
+  }, [pageW, fullHTML, fontSize, fontCss, columnCount, remeasure]);
 
-  // Compute translateX to show the current spread.
-  // Each spread = columnCount columns + (columnCount-1) inner gaps.
-  // Between spreads there's one columnGap.
-  // So offset for spread N = N * (columnCount * (colW + columnGap))
-  // = N * columnCount * (colW + columnGap)
-  // Because each column slot is (colW + gap), and the last gap of a spread
-  // runs into the next spread's first column, there's no extra gap.
-  const spreadWidth = colW > 0 ? columnCount * (colW + columnGap) : 0;
-  const translateX = -(spreadIndex * spreadWidth);
+  // ── Image load detection: remeasure after all images settle ──
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || pageW <= 0) return;
+
+    const imgs = el.querySelectorAll('img');
+    if (imgs.length === 0) return;
+
+    let loaded = 0;
+    const total = imgs.length;
+
+    const onSettled = () => {
+      loaded++;
+      if (loaded >= total) remeasure();
+    };
+
+    imgs.forEach((img) => {
+      if (img.complete) {
+        loaded++;
+      } else {
+        img.addEventListener('load', onSettled, { once: true });
+        img.addEventListener('error', onSettled, { once: true });
+      }
+    });
+
+    // All images already loaded
+    if (loaded >= total) remeasure();
+
+    // Fallback timeout in case load events don't fire
+    const fallback = setTimeout(remeasure, 2000);
+
+    return () => {
+      clearTimeout(fallback);
+      imgs.forEach((img) => {
+        img.removeEventListener('load', onSettled);
+        img.removeEventListener('error', onSettled);
+      });
+    };
+  }, [fullHTML, pageW, remeasure]);
+
+  // ── Navigate via scrollLeft ──
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || pageW <= 0) return;
+
+    // Scroll exactly one viewport width per spread — this matches
+    // the browser's own column layout which fills clientWidth exactly.
+    el.scrollLeft = spreadIndex * el.clientWidth;
+  }, [spreadIndex, pageW, columnCount, columnGap]);
+
+  // ── Page numbers ──
+  const leftPageNum = spreadIndex * columnCount + 1;
+  const rightPageNum = leftPageNum + 1;
+
+  // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-full relative overflow-hidden">
-      {/* The two-page surface with spine */}
+    <div className="h-full relative overflow-hidden" ref={containerRef}>
+      {/* Book surface card */}
       <div className="bg-surface h-full shadow-lg rounded-lg border border-primary/5 flex flex-col overflow-hidden">
-        {/* Character portraits row — only on first spread */}
+
+        {/* Character portraits — first spread only */}
         {mentionedCharacters.length > 0 && spreadIndex === 0 && (
           <div className="flex items-start gap-3 py-3 px-8 border-b border-primary/5 shrink-0">
-            {mentionedCharacters.map((character) => (
-              <CharacterPortrait key={character.id} character={character} />
+            {mentionedCharacters.map((c) => (
+              <CharacterPortrait key={c.id} character={c} />
             ))}
           </div>
         )}
 
-        {/* CSS-column paginated content — fills the page */}
-        <div className="flex-1 min-h-0 px-8 py-6">
-          {/* Clip wrapper — overflow:hidden masks the translateX sliding */}
-          <div ref={clipRef} className="h-full overflow-hidden">
-            <div
-              ref={contentRef}
-              className="h-full text-indigo leading-relaxed reader-content"
-              style={{
-                fontSize: `${fontSize}px`,
-                fontFamily: fontCss,
-                // Use a very large width so the browser creates as many columns as needed,
-                // each exactly colW pixels wide. This avoids column-count constraining
-                // the layout to the visible width (which causes overflow/clipping issues).
-                width: colW > 0 ? '100000px' : undefined,
-                columnWidth: colW > 0 ? `${colW}px` : undefined,
-                columnGap: `${columnGap}px`,
-                columnFill: 'auto',
-                transform: `translateX(${translateX}px)`,
-                transition: 'transform 0.3s ease-in-out',
-              }}
-              dangerouslySetInnerHTML={{ __html: fullHTML }}
-            />
+        {/* Content area — padding wrapper */}
+        <div data-content-area className="flex-1 min-h-0 px-8 py-6">
+          {/* Scroll/clip container — NO padding, pure overflow clip */}
+          <div
+            ref={scrollRef}
+            style={{
+              width: '100%',
+              height: '100%',
+              overflow: 'hidden',
+            }}
+          >
+            {/* CSS multi-column content */}
+            {pageW > 0 && (
+              <div
+                ref={contentRef}
+                className="reader-content text-indigo leading-relaxed"
+                style={{
+                  height: '100%',
+                  columnWidth: `${pageW}px`,
+                  columnGap: `${columnGap}px`,
+                  columnFill: 'auto',
+                  fontSize: `${fontSize}px`,
+                  fontFamily: fontCss,
+                }}
+                dangerouslySetInnerHTML={{ __html: fullHTML }}
+              />
+            )}
           </div>
         </div>
 
-        {/* Page numbers at bottom */}
+        {/* Page numbers */}
         <div className="shrink-0 flex items-center px-8 py-2">
           {columnCount >= 2 ? (
             <>
               <span className="flex-1 text-xs text-indigo/30 text-left">
-                {spreadIndex * 2 + 1}
+                {leftPageNum}
               </span>
               <span className="flex-1 text-xs text-indigo/30 text-right">
-                {spreadIndex * 2 + 2}
+                {rightPageNum}
               </span>
             </>
           ) : (
             <span className="flex-1 text-xs text-indigo/30 text-center">
-              {spreadIndex + 1}
+              {leftPageNum}
             </span>
           )}
         </div>
       </div>
 
-      {/* Full-height book spine — top to bottom of the entire card */}
+      {/* Full-height book spine */}
       {columnCount >= 2 && (
         <div
-          className="absolute inset-y-0 left-1/2 -translate-x-1/2 pointer-events-none"
+          className="absolute inset-y-0 left-1/2 -translate-x-1/2 pointer-events-none z-10"
           style={{ width: '2px' }}
         >
-          {/* Thin center line */}
           <div className="absolute inset-0 bg-primary/10" />
-          {/* Wider shadow glow */}
           <div
             className="absolute inset-y-0 -left-4 w-8"
             style={{
-              background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.03) 35%, rgba(0,0,0,0.05) 50%, rgba(0,0,0,0.03) 65%, transparent)',
+              background:
+                'linear-gradient(to right, transparent, rgba(0,0,0,0.03) 35%, rgba(0,0,0,0.05) 50%, rgba(0,0,0,0.03) 65%, transparent)',
             }}
           />
         </div>
@@ -269,7 +321,7 @@ export default function BookPage({
 
       {/* Hanako ghost popover for text selection */}
       <HanakoGhostPopover
-        containerRef={contentRef}
+        containerRef={containerRef}
         chapterContext={chapterContext ?? null}
       />
     </div>

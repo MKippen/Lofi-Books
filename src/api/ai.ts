@@ -16,6 +16,50 @@ export function getPromptVersion(): string | null {
   return _lastKnownPromptVersion;
 }
 
+// ---------------------------------------------------------------------------
+// Proofread types & API
+// ---------------------------------------------------------------------------
+
+export interface ProofreadIssue {
+  text: string;
+  suggestion: string;
+  explanation: string;
+  type: 'grammar' | 'spelling' | 'punctuation' | 'style';
+}
+
+export interface ProofreadResult {
+  issues: ProofreadIssue[];
+  summary: string;
+}
+
+/**
+ * Send text to the AI proofread endpoint for structured grammar/spelling check.
+ */
+export async function proofreadText(
+  text: string,
+  chapterTitle?: string,
+): Promise<ProofreadResult> {
+  const response = await fetch(`${BASE}/ai/proofread`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Id': getUserId(),
+    },
+    body: JSON.stringify({ text, chapterTitle }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Proofread error ${response.status}: ${errText}`);
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// Chat streaming API
+// ---------------------------------------------------------------------------
+
 /**
  * Stream a chat response from the AI endpoint.
  * Yields content chunks as they arrive via SSE.

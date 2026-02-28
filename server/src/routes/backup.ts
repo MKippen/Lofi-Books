@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, DATA_DIR } from '../db.js';
+import { db, DATA_DIR, IMAGES_DIR } from '../db.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -246,6 +246,17 @@ backupRouter.post('/restore', async (req, res) => {
 
     importAllData(data, userId);
 
+    // Restore image binary files from OneDrive
+    let imagesRestored = 0;
+    try {
+      imagesRestored = await restoreImagesFromOneDrive(token, data.images as ImageRow[]);
+      if (imagesRestored > 0) {
+        console.log(`[restore] Restored ${imagesRestored} image file(s) from OneDrive`);
+      }
+    } catch (imgErr) {
+      console.warn('[restore] Image restore failed (data is safe):', imgErr instanceof Error ? imgErr.message : imgErr);
+    }
+
     lastAccessToken = token;
     lastBackupTime = new Date().toISOString();
     lastBackupError = null;
@@ -256,6 +267,7 @@ backupRouter.post('/restore', async (req, res) => {
       totalRecords: data.books.length + data.characters.length +
         data.chapters.length + data.ideas.length +
         data.timelineEvents.length + data.wishlistItems.length,
+      imagesRestored,
     };
     console.log('Restore: success', result);
     res.json(result);
@@ -282,12 +294,19 @@ async function performBackup(accessToken: string, userId: string = '') {
     uploadFile(accessToken, timestampedName, blob),
   ]);
 
+  // Sync image binary files to OneDrive (incremental — skips already-uploaded)
+  const imageCount = await syncImagesToOneDrive(accessToken, data.images as ImageRow[]);
+  if (imageCount > 0) {
+    console.log(`[backup] Synced ${imageCount} image(s) to OneDrive`);
+  }
+
   const metadata = {
     timestamp: new Date().toISOString(),
-    version: 2,
+    version: 3,
     bookCount: data.books.length,
     totalRecords: data.books.length + data.characters.length + data.chapters.length +
       data.ideas.length + data.timelineEvents.length + data.wishlistItems.length,
+    imageCount: (data.images as unknown[]).length,
   };
   const metaBlob = new Blob([JSON.stringify(metadata)], { type: 'application/json' });
   await uploadFile(accessToken, 'backup-meta.json', metaBlob);
@@ -462,6 +481,164 @@ function importAllData(data: ReturnType<typeof exportAllData>, userId: string) {
   });
 
   restore();
+}
+
+// ---------------------------------------------------------------------------
+// Image binary sync
+// ---------------------------------------------------------------------------
+
+interface ImageRow {
+  id: string;
+  book_id: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+  created_at: string;
+}
+
+const IMAGES_FOLDER = `${BACKUP_FOLDER}/images`;
+
+function extFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
+    'image/webp': 'webp', 'image/svg+xml': 'svg',
+  };
+  return map[mime] || 'bin';
+}
+
+/**
+ * Sync local image files to OneDrive. Only uploads images that aren't
+ * already present on OneDrive (incremental).
+ * Returns the number of images newly uploaded.
+ */
+async function syncImagesToOneDrive(accessToken: string, images: ImageRow[]): Promise<number> {
+  if (images.length === 0) return 0;
+
+  // Ensure images subfolder exists
+  await ensureImagesFolder(accessToken);
+
+  // List existing files on OneDrive to avoid re-uploading
+  let existingFiles: Set<string> = new Set();
+  try {
+    const response = await graphFetch(
+      accessToken,
+      `/me/drive/root:/${IMAGES_FOLDER}:/children?$select=name&$top=200`,
+    );
+    const data = await response.json();
+    existingFiles = new Set((data.value as { name: string }[]).map(f => f.name));
+  } catch {
+    // Folder might be empty or not exist yet — that's fine
+  }
+
+  let uploaded = 0;
+  for (const img of images) {
+    const ext = extFromMime(img.mime_type);
+    const oneDriveFilename = `${img.id}.${ext}`;
+
+    // Skip if already on OneDrive
+    if (existingFiles.has(oneDriveFilename)) continue;
+
+    // Read local file
+    const localPath = path.join(IMAGES_DIR, oneDriveFilename);
+    if (!fs.existsSync(localPath)) {
+      console.warn(`[backup] Image file missing locally: ${localPath}`);
+      continue;
+    }
+
+    const fileBuffer = fs.readFileSync(localPath);
+    const blob = new Blob([fileBuffer], { type: img.mime_type });
+
+    const uploadPath = `/me/drive/root:/${IMAGES_FOLDER}/${oneDriveFilename}:/content`;
+    if (blob.size < 4 * 1024 * 1024) {
+      await graphFetch(accessToken, uploadPath, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: blob,
+      });
+    } else {
+      // Large file — use upload session
+      const sessionResponse = await graphFetch(
+        accessToken,
+        `/me/drive/root:/${IMAGES_FOLDER}/${oneDriveFilename}:/createUploadSession`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'replace' } }),
+        },
+      );
+      const { uploadUrl } = await sessionResponse.json();
+      const CHUNK_SIZE = 5 * 1024 * 1024;
+      const totalSize = blob.size;
+      let offset = 0;
+      while (offset < totalSize) {
+        const end = Math.min(offset + CHUNK_SIZE, totalSize);
+        const chunk = blob.slice(offset, end);
+        await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Length': `${chunk.size}`,
+            'Content-Range': `bytes ${offset}-${end - 1}/${totalSize}`,
+          },
+          body: chunk,
+        });
+        offset = end;
+      }
+    }
+
+    uploaded++;
+    console.log(`[backup] Uploaded image: ${oneDriveFilename} (${(blob.size / 1024).toFixed(0)}KB)`);
+  }
+
+  return uploaded;
+}
+
+/**
+ * Download image files from OneDrive that are missing locally.
+ * Called during restore.
+ */
+async function restoreImagesFromOneDrive(accessToken: string, images: ImageRow[]): Promise<number> {
+  if (images.length === 0) return 0;
+
+  let restored = 0;
+  for (const img of images) {
+    const ext = extFromMime(img.mime_type);
+    const filename = `${img.id}.${ext}`;
+    const localPath = path.join(IMAGES_DIR, filename);
+
+    // Skip if already exists locally
+    if (fs.existsSync(localPath)) continue;
+
+    try {
+      const response = await graphFetch(
+        accessToken,
+        `/me/drive/root:/${IMAGES_FOLDER}/${filename}:/content`,
+      );
+      const buffer = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(localPath, buffer);
+      restored++;
+      console.log(`[restore] Downloaded image: ${filename} (${(buffer.length / 1024).toFixed(0)}KB)`);
+    } catch (err) {
+      console.warn(`[restore] Could not download image ${filename}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  return restored;
+}
+
+async function ensureImagesFolder(accessToken: string) {
+  try {
+    await graphFetch(accessToken, `/me/drive/root:/${IMAGES_FOLDER}`);
+  } catch {
+    await graphFetch(accessToken, `/me/drive/root:/${BACKUP_FOLDER}:/children`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'images',
+        folder: {},
+        '@microsoft.graph.conflictBehavior': 'fail',
+      }),
+    });
+  }
 }
 
 async function graphFetch(accessToken: string, endpoint: string, options: RequestInit = {}) {

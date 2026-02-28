@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, BookA, Replace, Volume2, X, Wrench, Ghost } from 'lucide-react';
+import { useState, useEffect, useRef, type RefObject } from 'react';
+import { Search, BookA, Replace, Volume2, X, Wrench, Ghost, SpellCheck } from 'lucide-react';
+import type { Editor } from '@tiptap/react';
 import AssistPanel from './AssistPanel';
-import type { ChapterContext } from '@/components/layout/WritingToolsContext';
+import ProofreadPanel from './ProofreadPanel';
+import type { ChapterContext, WritingToolsTab } from '@/components/layout/WritingToolsContext';
 
 // ---------------------------------------------------------------------------
 // Types for DictionaryAPI response
@@ -223,7 +225,7 @@ function PhoneticBadge({ phonetics }: { phonetics: Phonetic[] }) {
 // Dictionary Panel
 // ---------------------------------------------------------------------------
 
-function DictionaryPanel() {
+export function DictionaryPanel() {
   const [query, setQuery] = useState('');
   const [entries, setEntries] = useState<DictEntry[] | null>(null);
   const [error, setError] = useState('');
@@ -480,11 +482,12 @@ function ThesaurusPanel() {
 // Slide-out Panel
 // ---------------------------------------------------------------------------
 
-type ToolTab = 'dictionary' | 'thesaurus' | 'hanako';
+type ToolTab = WritingToolsTab;
 
 const TABS: { id: ToolTab; label: string; icon: typeof BookA }[] = [
   { id: 'dictionary', label: 'Dictionary', icon: BookA },
   { id: 'thesaurus', label: 'Thesaurus', icon: Replace },
+  { id: 'proofread', label: 'Proofread', icon: SpellCheck },
   { id: 'hanako', label: 'Hanako', icon: Ghost },
 ];
 
@@ -492,10 +495,19 @@ interface WritingToolsPanelProps {
   open: boolean;
   onClose: () => void;
   chapterContext?: ChapterContext | null;
+  initialTab?: ToolTab;
+  editorRef?: RefObject<Editor | null>;
 }
 
-export default function WritingToolsPanel({ open, onClose, chapterContext }: WritingToolsPanelProps) {
+export default function WritingToolsPanel({ open, onClose, chapterContext, initialTab, editorRef }: WritingToolsPanelProps) {
   const [activeTab, setActiveTab] = useState<ToolTab>('hanako');
+
+  // Switch to requested tab when panel opens with an initialTab
+  useEffect(() => {
+    if (open && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [open, initialTab]);
 
   // Close on Escape key
   useEffect(() => {
@@ -580,8 +592,8 @@ export default function WritingToolsPanel({ open, onClose, chapterContext }: Wri
           })}
         </div>
 
-        {/* Tab content */}
-        <div className={`flex-1 overflow-y-auto min-h-0 p-5 ${activeTab === 'hanako' ? 'hidden' : ''}`}>
+        {/* Tab content — dictionary & thesaurus (mount on demand) */}
+        <div className={`flex-1 overflow-y-auto min-h-0 p-5 ${activeTab === 'dictionary' || activeTab === 'thesaurus' ? '' : 'hidden'}`}>
           {activeTab === 'dictionary' && (
             <div className="rounded-2xl bg-cream border border-primary/10 p-4">
               <DictionaryPanel />
@@ -594,6 +606,19 @@ export default function WritingToolsPanel({ open, onClose, chapterContext }: Wri
             </div>
           )}
         </div>
+
+        {/* Proofread panel — always mounted to preserve results */}
+        {editorRef && (
+          <div className={`flex-1 overflow-y-auto min-h-0 p-5 ${activeTab === 'proofread' ? '' : 'hidden'}`}>
+            <div className="rounded-2xl bg-cream border border-primary/10 p-4">
+              <ProofreadPanel
+                chapterContext={chapterContext ?? null}
+                editorRef={editorRef}
+                onClose={onClose}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Hanako panel — always mounted to preserve session */}
         <div className={`flex-1 min-h-0 p-5 ${activeTab === 'hanako' ? 'flex flex-col' : 'hidden'}`}>

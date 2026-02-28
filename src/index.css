@@ -387,6 +387,15 @@ body {
   break-inside: avoid;
 }
 
+/* Headings should not be orphaned at bottom of column */
+.reader-content h1,
+.reader-content h2,
+.reader-content h3,
+.reader-content .reader-chapter-header {
+  break-inside: avoid;
+  break-after: avoid;
+}
+
 /* Reader: full-width manga-style illustration panels */
 .reader-content .illustration-reader-card {
   position: relative;
@@ -395,6 +404,8 @@ body {
   border-radius: 8px;
   overflow: hidden;
   break-inside: avoid;
+  max-height: 100%;
+  box-sizing: border-box;
 }
 
 .reader-content .illustration-reader-card img {

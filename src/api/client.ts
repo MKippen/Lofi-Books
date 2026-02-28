@@ -1,22 +1,36 @@
 import { msalInstance } from '@/auth/msalInstance';
+import { loginRequest } from '@/auth/msalConfig';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api';
 
 /** Get the current user's unique ID from MSAL (Azure AD OID). */
 function getUserId(): string {
+  return msalInstance.getActiveAccount()?.localAccountId ?? '';
+}
+
+/** Acquire an ID token silently for Bearer auth. ID token has aud:clientId — validatable server-side. */
+async function getBearerToken(): Promise<string> {
   const account = msalInstance.getActiveAccount();
-  return account?.localAccountId ?? '';
+  if (!account) return '';
+  try {
+    const result = await msalInstance.acquireTokenSilent({ ...loginRequest, account });
+    return result.idToken;
+  } catch {
+    return '';
+  }
 }
 
 export async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const token = await getBearerToken();
   const response = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       'X-User-Id': getUserId(),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });

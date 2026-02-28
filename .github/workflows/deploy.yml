@@ -1,0 +1,97 @@
+name: Deploy to AKS
+
+on:
+  push:
+    branches: [releasev1]
+
+env:
+  RESOURCE_GROUP: rg-lofi-books-prod
+  AKS_CLUSTER: aks-lofi-books-prod
+
+permissions:
+  id-token: write   # Required for OIDC token issuance (no stored credentials)
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build & push images to ACR
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # OIDC login — no AZURE_CREDENTIALS secret, no expiring service principal
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Set image tag (git short SHA)
+        id: meta
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push frontend
+        run: |
+          docker build \
+            --build-arg VITE_MSAL_CLIENT_ID=${{ secrets.VITE_MSAL_CLIENT_ID }} \
+            --build-arg VITE_MSAL_AUTHORITY=${{ secrets.VITE_MSAL_AUTHORITY }} \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/lofi-books-frontend:${{ steps.meta.outputs.tag }} \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/lofi-books-frontend:latest \
+            .
+          docker push ${{ vars.ACR_LOGIN_SERVER }}/lofi-books-frontend --all-tags
+
+      - name: Build & push backend
+        run: |
+          docker build \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/lofi-books-api:${{ steps.meta.outputs.tag }} \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/lofi-books-api:latest \
+            server/
+          docker push ${{ vars.ACR_LOGIN_SERVER }}/lofi-books-api --all-tags
+
+  deploy:
+    name: Deploy to AKS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER }} \
+            --overwrite-existing
+
+      - name: Update image tags
+        run: |
+          kubectl set image deployment/lofi-books-frontend \
+            frontend=${{ vars.ACR_LOGIN_SERVER }}/lofi-books-frontend:${{ needs.build-and-push.outputs.image-tag }} \
+            -n lofi-books
+          kubectl set image deployment/lofi-books-api \
+            api=${{ vars.ACR_LOGIN_SERVER }}/lofi-books-api:${{ needs.build-and-push.outputs.image-tag }} \
+            -n lofi-books
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/lofi-books-frontend -n lofi-books --timeout=120s
+          kubectl rollout status deployment/lofi-books-api -n lofi-books --timeout=120s
+
+      - name: Verify health
+        run: |
+          kubectl wait --for=condition=ready pod \
+            -l app=lofi-books-api -n lofi-books --timeout=60s
+          kubectl wait --for=condition=ready pod \
+            -l app=lofi-books-frontend -n lofi-books --timeout=60s

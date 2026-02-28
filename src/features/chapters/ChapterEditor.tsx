@@ -8,7 +8,7 @@ import Underline from '@tiptap/extension-underline';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
 import { IllustrationEmbed } from './extensions/IllustrationEmbed';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, StickyNote, Palette, Wrench } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, StickyNote, Palette, Wrench, SpellCheck } from 'lucide-react';
 import { useWritingTools } from '@/components/layout/WritingToolsContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getChapterApi } from '@/api/chapters';
@@ -64,7 +64,7 @@ export default function ChapterEditor() {
   const [rightOpen, setRightOpen] = useState(!isSmallScreen);
   const [rightTab, setRightTab] = useState<RightTab>('notes');
 
-  const { openWritingTools } = useWritingTools();
+  const { openWritingTools, editorRef } = useWritingTools();
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
@@ -194,6 +194,18 @@ export default function ChapterEditor() {
     },
   });
 
+  // Expose editor instance to WritingToolsContext for proofread panel
+  useEffect(() => {
+    if (editor) {
+      editorRef.current = editor;
+    }
+    return () => {
+      if (editorRef.current === editor) {
+        editorRef.current = null;
+      }
+    };
+  }, [editor, editorRef]);
+
   // When chapter data loads, update editor content
   useEffect(() => {
     if (editor && chapter && !editor.isDestroyed) {
@@ -289,6 +301,20 @@ export default function ChapterEditor() {
           <div className="flex-1 min-w-0">
             <EditorToolbar editor={editor} />
           </div>
+
+          <button
+            type="button"
+            onClick={() => openWritingTools({
+              chapterId: chapterId!,
+              title,
+              content: editor?.getHTML() || '',
+              wordCount: editor?.storage.characterCount.words() || 0,
+            }, 'proofread')}
+            className="flex items-center justify-center w-9 h-9 mx-0.5 text-indigo/30 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors cursor-pointer"
+            title="Proofread"
+          >
+            <SpellCheck size={16} />
+          </button>
 
           <button
             type="button"

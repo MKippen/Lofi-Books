@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Apply namespace first, then security (SA, SecretProviderClass, NetworkPolicies),
+# then storage (PVC), then workloads, then ingress.
+resources:
+  - namespace.yaml
+  - security/workload-sa.yaml
+  - security/secret-provider-class.yaml
+  - security/network-policies.yaml
+  - backend/pvc.yaml
+  - backend/service.yaml
+  - backend/deployment.yaml
+  - frontend/service.yaml
+  - frontend/deployment.yaml
+  - ingress/cluster-issuer.yaml
+  - ingress/ingress.yaml

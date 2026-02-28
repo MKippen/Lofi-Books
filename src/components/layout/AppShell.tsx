@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Outlet, useLocation } from 'react-router'
 import { Menu, X } from 'lucide-react'
+import type { Editor } from '@tiptap/react'
 import Sidebar from './Sidebar'
 import WritingToolsPanel from '@/features/tools/WritingToolsPanel'
 import { WritingToolsContext } from './WritingToolsContext'
-import type { ChapterContext } from './WritingToolsContext'
+import type { ChapterContext, WritingToolsTab } from './WritingToolsContext'
 
 const COLLAPSED_KEY = 'sidebar-collapsed'
 
@@ -12,10 +13,12 @@ export default function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [chapterCtx, setChapterCtx] = useState<ChapterContext | null>(null)
+  const [initialTab, setInitialTab] = useState<WritingToolsTab | undefined>(undefined)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSED_KEY) === 'true' } catch { return false }
   })
   const location = useLocation()
+  const editorRef = useRef<Editor | null>(null)
 
   // Hide sidebar entirely on the reader page (full-screen reading experience)
   const isReaderPage = location.pathname.includes('/read')
@@ -34,11 +37,13 @@ export default function AppShell() {
   }, [])
 
   const writingToolsCtx = useMemo(() => ({
-    openWritingTools: (ctx?: ChapterContext) => {
+    openWritingTools: (ctx?: ChapterContext, tab?: WritingToolsTab) => {
       setChapterCtx(ctx ?? null)
+      setInitialTab(tab)
       setToolsOpen(true)
     },
     chapterContext: chapterCtx,
+    editorRef,
   }), [chapterCtx])
 
   return (
@@ -92,7 +97,13 @@ export default function AppShell() {
         </main>
 
         {/* Writing Tools slide-out panel */}
-        <WritingToolsPanel open={toolsOpen} onClose={() => setToolsOpen(false)} chapterContext={chapterCtx} />
+        <WritingToolsPanel
+          open={toolsOpen}
+          onClose={() => setToolsOpen(false)}
+          chapterContext={chapterCtx}
+          initialTab={initialTab}
+          editorRef={editorRef}
+        />
       </div>
     </WritingToolsContext.Provider>
   )

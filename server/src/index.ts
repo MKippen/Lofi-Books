@@ -11,16 +11,30 @@ import { wishlistRouter } from './routes/wishlist.js';
 import { imagesRouter } from './routes/images.js';
 import { backupRouter } from './routes/backup.js';
 import { aiRouter } from './routes/ai.js';
+import { requireAuth } from './middleware/auth.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
-app.use(cors());
+// CORS: allow only configured origins (env var) or localhost for local dev
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',')
+  ?? ['http://localhost:5174', 'http://localhost:5173'];
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
-// Extract user ID from X-User-Id header and attach to request
+// JWT validation on all routes except /api/health.
+// Skipped when MSAL_CLIENT_ID is not configured (local dev without env set).
+app.use((req, res, next) => {
+  if (req.path === '/api/health') return next();
+  if (!process.env.MSAL_CLIENT_ID) return next();
+  requireAuth(req, res, next);
+});
+
+// Extract user ID: prefer JWT claim set by requireAuth, fall back to X-User-Id header.
 app.use((req, _res, next) => {
-  (req as any).userId = req.headers['x-user-id'] as string || '';
+  if (!(req as any).userId) {
+    (req as any).userId = req.headers['x-user-id'] as string || '';
+  }
   next();
 });
 

@@ -162,3 +162,91 @@ aiRouter.post('/chat', async (req, res) => {
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// POST /api/ai/proofread — structured grammar/spelling check
+// ---------------------------------------------------------------------------
+
+const PROOFREAD_PROMPT = `You are Hanako, a friendly ghost writing buddy helping a young writer proofread her text.
+
+Return ONLY a JSON object. Example:
+
+{"issues":[{"text":"She walk to the store","suggestion":"She walked to the store","explanation":"Tiny tense mix-up~ should be past tense here!","type":"grammar"}],"summary":"Looking good overall~ just a small thing to fix!"}
+
+Schema:
+- "issues": array of objects, each with:
+  - "text": exact substring from the original (copy-paste, no changes)
+  - "suggestion": corrected version of that text
+  - "explanation": one short encouraging sentence in Hanako's playful voice
+  - "type": one of "grammar", "spelling", "punctuation", or "style"
+- "summary": one encouraging sentence about the writing overall
+
+Rules:
+- Only flag clear, objective errors — never flag stylistic or creative choices.
+- Maximum 10 issues. Prioritize the most important.
+- If text is clean, return: {"issues":[],"summary":"Your writing looks great~ no issues found!"}
+- Keep explanations SHORT and friendly with occasional tildes (~).
+- NEVER rewrite their story — only identify mechanical errors.`;
+
+aiRouter.post('/proofread', async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: 'OpenAI API key not configured' });
+    return;
+  }
+
+  const { text, chapterTitle } = req.body as {
+    text?: string;
+    chapterTitle?: string;
+  };
+
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    res.status(400).json({ error: 'Text is required' });
+    return;
+  }
+
+  // Strip HTML and truncate
+  const plainText = stripHtml(text);
+  const truncated = plainText.length > 4000 ? plainText.slice(0, 4000) + '...' : plainText;
+
+  const openai = new OpenAI({ apiKey });
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: PROOFREAD_PROMPT },
+        {
+          role: 'user',
+          content: chapterTitle
+            ? `Please proofread this text from my chapter "${chapterTitle}":\n\n${truncated}`
+            : `Please proofread this text:\n\n${truncated}`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 1500,
+      temperature: 0.3,
+    });
+
+    const finishReason = completion.choices[0]?.finish_reason;
+    const raw = completion.choices[0]?.message?.content || '{}';
+    console.log('[proofread] finish_reason:', finishReason, 'raw length:', raw.length, 'first 300 chars:', raw.slice(0, 300));
+    let result;
+    try {
+      result = JSON.parse(raw);
+    } catch (parseErr) {
+      console.error('[proofread] JSON parse failed:', parseErr, 'raw:', raw.slice(0, 500));
+      result = { issues: [], summary: 'Hmm, Hanako got a little confused~ Try again?' };
+    }
+
+    // Ensure the response matches expected shape
+    if (!Array.isArray(result.issues)) result.issues = [];
+    if (typeof result.summary !== 'string') result.summary = '';
+
+    console.log('[proofread] returning', result.issues.length, 'issues');
+    res.json(result);
+  } catch (err: unknown) {
+    console.error('OpenAI proofread error:', err);
+    res.status(500).json({ error: 'Failed to proofread text' });
+  }
+});

@@ -12,6 +12,7 @@ const SELECTION_PROMPTS = [
   "How's the flow here?",
   'Is this clear?',
   'Anything awkward?',
+  'Check my grammar',
 ];
 
 const MAX_SELECTED_CHARS = 500;
