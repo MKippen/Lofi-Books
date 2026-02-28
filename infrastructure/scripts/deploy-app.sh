@@ -81,23 +81,11 @@ az keyvault secret set \
 echo "  Secrets stored: ${APP}-${ENV}-openai-api-key, ${APP}-${ENV}-msal-client-id"
 
 echo "=== [${APP}/${ENV}] Applying K8s manifests ==="
-MANIFESTS_TMP=$(mktemp -d)
-cp -r "$OVERLAY_DIR/." "$MANIFESTS_TMP/"
-
-# Substitute runtime values into files with placeholders
+# Render kustomize from original path (preserves ../../base relative refs),
+# pipe through envsubst for MSI client ID + tenant ID substitution, then apply.
 export WORKLOAD_IDENTITY_CLIENT_ID
 export AZURE_TENANT_ID
-
-for f in workload-sa.yaml secret-provider-class.yaml; do
-  if [ -f "$OVERLAY_DIR/$f" ]; then
-    envsubst < "$OVERLAY_DIR/$f" > "$MANIFESTS_TMP/$f"
-  fi
-done
-# Copy kustomization and other files
-cp "$OVERLAY_DIR/kustomization.yaml" "$MANIFESTS_TMP/kustomization.yaml"
-
-kubectl apply -k "$MANIFESTS_TMP"
-rm -rf "$MANIFESTS_TMP"
+kubectl kustomize "$OVERLAY_DIR" | envsubst | kubectl apply -f -
 echo "  K8s manifests applied for namespace: $K8S_NAMESPACE"
 
 # Set GitHub environment secrets if gh is available

@@ -19,7 +19,3 @@ patches:
     target:
       kind: Deployment
       name: lofibooks-api
-  - path: patches/resources.yaml
-    target:
-      kind: Deployment
-      name: lofibooks-frontend
