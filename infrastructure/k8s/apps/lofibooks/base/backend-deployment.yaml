@@ -86,5 +86,6 @@ spec:
             volumeAttributes:
               secretProviderClass: lofibooks-secrets
       securityContext:
+        fsGroup: 1001  # Ensures /data volume is owned by appuser's group
         seccompProfile:
           type: RuntimeDefault

@@ -34,6 +34,7 @@ az acr login --name "$ACR_NAME"
 
 echo "=== Building and pushing ${APP} frontend ($IMAGE_TAG) ==="
 docker build \
+  --platform linux/amd64 \
   --build-arg VITE_MSAL_CLIENT_ID="$MSAL_CLIENT_ID" \
   --build-arg VITE_MSAL_AUTHORITY="$MSAL_AUTHORITY" \
   -t "${ACR_LOGIN_SERVER}/${APP}-frontend:${IMAGE_TAG}" \
@@ -43,6 +44,7 @@ docker push "${ACR_LOGIN_SERVER}/${APP}-frontend" --all-tags
 
 echo "=== Building and pushing ${APP} api ($IMAGE_TAG) ==="
 docker build \
+  --platform linux/amd64 \
   -t "${ACR_LOGIN_SERVER}/${APP}-api:${IMAGE_TAG}" \
   -t "${ACR_LOGIN_SERVER}/${APP}-api:latest" \
   "$REPO_ROOT/server"
