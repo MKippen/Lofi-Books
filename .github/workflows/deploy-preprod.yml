@@ -35,10 +35,14 @@ jobs:
         run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build & push frontend
+        env:
+          VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
+          VITE_MSAL_AUTHORITY: ${{ secrets.VITE_MSAL_AUTHORITY }}
         run: |
           docker build \
-            --build-arg VITE_MSAL_CLIENT_ID=${{ secrets.VITE_MSAL_CLIENT_ID }} \
-            --build-arg VITE_MSAL_AUTHORITY=${{ secrets.VITE_MSAL_AUTHORITY }} \
+            --platform linux/amd64 \
+            --build-arg VITE_MSAL_CLIENT_ID="${VITE_MSAL_CLIENT_ID}" \
+            --build-arg VITE_MSAL_AUTHORITY="${VITE_MSAL_AUTHORITY}" \
             -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ steps.tag.outputs.sha }} \
             -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:preprod-latest \
             .
@@ -47,6 +51,7 @@ jobs:
       - name: Build & push api
         run: |
           docker build \
+            --platform linux/amd64 \
             -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ steps.tag.outputs.sha }} \
             -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:preprod-latest \
             server/
@@ -71,9 +76,10 @@ jobs:
         run: |
           az aks get-credentials \
             --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
-            --name ${{ vars.AKS_CLUSTER }} --overwrite-existing
+            --name ${{ vars.AKS_CLUSTER }} \
+            --admin --overwrite-existing
 
-      - name: Roll out images
+      - name: Update deployment images
         run: |
           kubectl set image deployment/${{ env.APP }}-frontend \
             frontend=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ needs.build-and-push.outputs.image-tag }} \
@@ -82,7 +88,15 @@ jobs:
             api=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ needs.build-and-push.outputs.image-tag }} \
             -n ${{ env.K8S_NAMESPACE }}
 
-      - name: Wait for rollout
+      - name: Wait for rollout (skipped if preprod is scaled to zero)
         run: |
-          kubectl rollout status deployment/${{ env.APP }}-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=120s
-          kubectl rollout status deployment/${{ env.APP }}-api -n ${{ env.K8S_NAMESPACE }} --timeout=120s
+          REPLICAS=$(kubectl get deployment/${{ env.APP }}-api -n ${{ env.K8S_NAMESPACE }} \
+            -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          if [ "$REPLICAS" -gt 0 ]; then
+            kubectl rollout status deployment/${{ env.APP }}-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=120s
+            kubectl rollout status deployment/${{ env.APP }}-api -n ${{ env.K8S_NAMESPACE }} --timeout=120s
+            echo "Preprod deployed: https://preprod.lofibooks.sm2gk.com"
+          else
+            echo "Preprod is scaled to zero — image updated, will apply on next scale-up."
+            echo "Run: bash ops/preprod-on.sh  (from sm2gk repo)"
+          fi

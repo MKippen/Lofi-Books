@@ -13,44 +13,53 @@ permissions:
   contents: read
 
 jobs:
-  promote:
-    name: Promote preprod image to prod (no rebuild)
+  build-and-push:
+    name: Build & push to ACR
     runs-on: ubuntu-latest
     outputs:
       image-tag: ${{ steps.tag.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure login (OIDC)
+      - name: Azure login (OIDC — no stored credentials)
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: ACR login
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
       - id: tag
         run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      # Re-tag the same image SHA with prod-latest — no rebuild
-      - name: Promote frontend image
+      - name: Build & push frontend
+        env:
+          VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
+          VITE_MSAL_AUTHORITY: ${{ secrets.VITE_MSAL_AUTHORITY }}
         run: |
-          az acr import \
-            --name ${{ vars.ACR_NAME }} \
-            --source ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ steps.tag.outputs.sha }} \
-            --image ${{ env.APP }}-frontend:prod-latest \
-            --force
+          docker build \
+            --platform linux/amd64 \
+            --build-arg VITE_MSAL_CLIENT_ID="${VITE_MSAL_CLIENT_ID}" \
+            --build-arg VITE_MSAL_AUTHORITY="${VITE_MSAL_AUTHORITY}" \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ steps.tag.outputs.sha }} \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:prod-latest \
+            .
+          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend --all-tags
 
-      - name: Promote api image
+      - name: Build & push api
         run: |
-          az acr import \
-            --name ${{ vars.ACR_NAME }} \
-            --source ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ steps.tag.outputs.sha }} \
-            --image ${{ env.APP }}-api:prod-latest \
-            --force
+          docker build \
+            --platform linux/amd64 \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ steps.tag.outputs.sha }} \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:prod-latest \
+            server/
+          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api --all-tags
 
   deploy:
     name: Deploy to lofibooks (prod)
-    needs: promote
+    needs: build-and-push
     runs-on: ubuntu-latest
     environment: lofibooks-prod
     steps:
@@ -67,15 +76,16 @@ jobs:
         run: |
           az aks get-credentials \
             --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
-            --name ${{ vars.AKS_CLUSTER }} --overwrite-existing
+            --name ${{ vars.AKS_CLUSTER }} \
+            --admin --overwrite-existing
 
       - name: Roll out images
         run: |
           kubectl set image deployment/${{ env.APP }}-frontend \
-            frontend=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ needs.promote.outputs.image-tag }} \
+            frontend=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ needs.build-and-push.outputs.image-tag }} \
             -n ${{ env.K8S_NAMESPACE }}
           kubectl set image deployment/${{ env.APP }}-api \
-            api=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ needs.promote.outputs.image-tag }} \
+            api=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ needs.build-and-push.outputs.image-tag }} \
             -n ${{ env.K8S_NAMESPACE }}
 
       - name: Wait for rollout
@@ -85,5 +95,5 @@ jobs:
 
       - name: Verify health
         run: |
-          kubectl wait --for=condition=ready pod \
-            -l app=${{ env.APP }}-api -n ${{ env.K8S_NAMESPACE }} --timeout=60s
+          sleep 5
+          curl -sf https://lofibooks.sm2gk.com/api/health | grep ok
