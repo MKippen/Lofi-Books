@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID:?Set AZURE_SUBSCRIPTION_ID}"
-LOCATION="eastus"
+LOCATION="westus2"
 RESOURCE_GROUP="rg-sm2gk"
 CLUSTER_NAME="aks-sm2gk"
 ACR_NAME="acrsm2gk"

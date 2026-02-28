@@ -1,4 +1,4 @@
 using '../main.bicep'
 
-param location = 'eastus'
+param location = 'westus2'
 param alertEmail = 'mike@sm2gk.com'

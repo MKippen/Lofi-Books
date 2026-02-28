@@ -4,7 +4,7 @@
 targetScope = 'subscription'
 
 @description('Azure region for all resources')
-param location string = 'eastus'
+param location string = 'westus2'
 
 @description('Email for budget and cert-manager alerts')
 param alertEmail string = 'mike@sm2gk.com'
