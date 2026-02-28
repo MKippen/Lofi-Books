@@ -52,6 +52,27 @@ spec:
           port: 3001
 
 ---
+# cert-manager ACME HTTP-01 solver pods need ingress from NGINX on port 8089
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-acme-solver
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8089
+
+---
 # Backend needs outbound access: OpenAI API, Microsoft Graph, Key Vault, DNS
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

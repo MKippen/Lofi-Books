@@ -40,14 +40,14 @@ AZURE_TENANT_ID=$(az account show --query "tenantId" -o tsv)
 
 # Save platform outputs for use by other scripts
 cat > "$REPO_ROOT/infrastructure/.platform-outputs.env" <<EOF
-AZURE_SUBSCRIPTION_ID=${SUBSCRIPTION_ID}
-AZURE_TENANT_ID=${AZURE_TENANT_ID}
-RESOURCE_GROUP=${RESOURCE_GROUP}
-AKS_NAME=${AKS_NAME}
-AKS_OIDC_ISSUER=${AKS_OIDC_ISSUER}
-ACR_NAME=${ACR_NAME}
-ACR_LOGIN_SERVER=${ACR_LOGIN_SERVER}
-KV_NAME=${KV_NAME}
+export AZURE_SUBSCRIPTION_ID=${SUBSCRIPTION_ID}
+export AZURE_TENANT_ID=${AZURE_TENANT_ID}
+export RESOURCE_GROUP=${RESOURCE_GROUP}
+export AKS_NAME=${AKS_NAME}
+export AKS_OIDC_ISSUER=${AKS_OIDC_ISSUER}
+export ACR_NAME=${ACR_NAME}
+export ACR_LOGIN_SERVER=${ACR_LOGIN_SERVER}
+export KV_NAME=${KV_NAME}
 EOF
 echo ".platform-outputs.env written (sourced by deploy-app.sh)"
 
