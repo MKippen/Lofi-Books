@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: lofibooks-preprod
+
+resources:
+  - ../../base
+  - namespace.yaml
+  - workload-sa.yaml
+  - secret-provider-class.yaml
+  - ingress.yaml
+
+patches:
+  - path: patches/backend-env.yaml
+    target:
+      kind: Deployment
+      name: lofibooks-api
+  - path: patches/resources.yaml
+    target:
+      kind: Deployment
+      name: lofibooks-api
+  - path: patches/resources.yaml
+    target:
+      kind: Deployment
+      name: lofibooks-frontend

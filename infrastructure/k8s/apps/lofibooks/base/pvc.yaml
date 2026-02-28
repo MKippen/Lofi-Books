@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lofibooks-data
+spec:
+  accessModes:
+    - ReadWriteOnce        # Azure Managed Disk: single-node attachment, matches replicas:1
+  storageClassName: managed-csi  # Azure CSI driver, AES-256 encryption at rest by default
+  resources:
+    requests:
+      storage: 4Gi

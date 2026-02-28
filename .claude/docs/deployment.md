@@ -1,108 +1,89 @@
 # Deployment Runbook
 
-## Initial Deployment
+## Initial Platform Setup (one-time)
 
-### Prerequisites
-- Azure CLI (`az`) logged in: `az login`
-- Helm installed: `brew install helm`
-- kubectl installed: `brew install kubectl`
-- gh CLI authenticated: `gh auth login`
-- Docker running
-
-### Step 1: Set environment variables
 ```bash
-export AZURE_SUBSCRIPTION_ID="<your-subscription-id>"
+# Prerequisites: az login, helm, kubectl, docker, gh auth login
+
+export AZURE_SUBSCRIPTION_ID="a989f0bf-5286-4d53-83b7-61b3a7ce82fb"
 export GITHUB_REPO="MKippen/Lofi-Books"
-# OpenAI key is read from .env automatically
+
+bash infrastructure/scripts/setup-cluster.sh
 ```
 
-### Step 2: Run the setup script
+Creates: `rg-sm2gk`, `aks-sm2gk`, `acrsm2gk`, `kv-sm2gk`, `law-sm2gk`,
+NGINX Ingress Controller, cert-manager, ClusterIssuer, GitHub OIDC SP.
+
+## Deploy an App+Env (repeatable for each app and environment)
+
 ```bash
-bash infrastructure/scripts/setup-azure.sh
+# Preprod first
+bash infrastructure/scripts/deploy-app.sh lofibooks preprod
+
+# Production
+bash infrastructure/scripts/deploy-app.sh lofibooks prod
 ```
 
-This script:
-1. Deploys Bicep (AKS, ACR, Key Vault, Log Analytics, MSI, budget alerts)
-2. Stores OpenAI API key and MSAL client ID in Key Vault
-3. Creates Workload Identity federated credential
-4. Creates GitHub Actions OIDC federated credential (no stored secrets)
-5. Installs NGINX Ingress Controller + cert-manager via Helm
-6. Applies all K8s manifests
-7. Sets GitHub variables and secrets via `gh`
-8. Outputs the ingress LoadBalancer IP
+Creates: MSI `id-lofibooks-<env>`, federated credential, KV secrets, K8s namespace + workloads.
 
-### Step 3: Build and push Docker images (first time)
+## Build & Push Images (first time, or for manual deploys)
+
 ```bash
-ACR_SERVER=$(az acr show --name acrlofibooks prod --query loginServer -o tsv)
-az acr login --name acrlofibooks prod
-
-# Frontend
-docker build \
-  --build-arg VITE_MSAL_CLIENT_ID=$(grep VITE_MSAL_CLIENT_ID .env | cut -d= -f2) \
-  --build-arg VITE_MSAL_AUTHORITY=https://login.microsoftonline.com/consumers \
-  -t ${ACR_SERVER}/lofi-books-frontend:latest .
-docker push ${ACR_SERVER}/lofi-books-frontend:latest
-
-# Backend
-docker build -t ${ACR_SERVER}/lofi-books-api:latest server/
-docker push ${ACR_SERVER}/lofi-books-api:latest
+bash infrastructure/scripts/build-push.sh lofibooks
 ```
 
-### Step 4: Set DNS in GoDaddy (manual)
-The setup script outputs the ingress IP. In GoDaddy DNS Management for sm2gk.com:
-- Type: A
-- Name: lofibooks
-- Value: `<ingress-ip>`
-- TTL: 600
+## Set GoDaddy DNS (manual — output from setup-cluster.sh)
 
-### Step 5: Update Entra App Registration (manual)
-1. Go to portal.azure.com → Entra ID → App Registrations → Lofi-Books
-2. Authentication → Add platform → SPA → Redirect URI: `https://lofibooks.sm2gk.com/`
-3. Under "Implicit grant and hybrid flows" → check "ID tokens"
-4. Save
+In GoDaddy DNS for sm2gk.com, add:
+| Type | Name | Value |
+|------|------|-------|
+| A | `lofibooks` | `<ingress-ip>` |
+| A | `preprod.lofibooks` | `<ingress-ip>` |
 
-### Step 6: Verify
+TTL: 600
+
+## Update Entra App Registration (manual)
+
+1. portal.azure.com → Entra ID → App Registrations → find Lofi-Books app
+2. Authentication → Add redirect URI: `https://lofibooks.sm2gk.com/`
+3. Also add: `https://preprod.lofibooks.sm2gk.com/`
+4. Under "Implicit grant and hybrid flows" → check "ID tokens"
+5. Save
+
+## Verify Deployment
+
 ```bash
-# All pods running
-kubectl get pods -n lofi-books
-
-# TLS cert issued (takes ~2 min after DNS propagates)
-kubectl get certificate -n lofi-books
-
-# Health check
+kubectl get pods -n lofibooks          # Running
+kubectl get pods -n lofibooks-preprod   # Running
+kubectl get certificate -n lofibooks    # READY=True (takes ~2 min post-DNS)
 curl https://lofibooks.sm2gk.com/api/health
+curl https://preprod.lofibooks.sm2gk.com/api/health
 ```
 
----
+## Adding a Second App to the Platform
 
-## Ongoing Deployments (CI/CD)
+```bash
+# 1. Create app Bicep (copy/modify infrastructure/bicep/apps/lofibooks/)
+# 2. Create K8s manifests (copy/modify infrastructure/k8s/apps/lofibooks/)
+# 3. Create GitHub Actions workflows (copy/modify .github/workflows/deploy-lofibooks-*)
+# 4. Deploy:
+bash infrastructure/scripts/deploy-app.sh zeroproof preprod
+bash infrastructure/scripts/deploy-app.sh zeroproof prod
+bash infrastructure/scripts/build-push.sh zeroproof
+# 5. Add DNS A record for zeroproof.sm2gk.com (same ingress IP)
+# No cluster changes needed — shared platform handles it automatically
+```
 
-Push to `releasev1` branch → GitHub Actions:
-1. Builds and pushes frontend + backend images with git SHA tag
-2. `kubectl set image` on both deployments
-3. Waits for rollout completion
-4. Verifies pods are Ready
+## Scaling the Node Pool
 
----
+```bash
+# Upgrade to more RAM (handles 3-5 small apps)
+az aks nodepool update \
+  --resource-group rg-sm2gk --cluster-name aks-sm2gk \
+  --name nodepool1 --node-vm-size Standard_B2ms
 
-## Adding a New App to the Cluster
-
-1. Create a new namespace:
-   ```bash
-   kubectl create namespace my-new-app
-   ```
-
-2. Create a new Workload Identity MSI:
-   ```bash
-   az identity create --name id-my-new-app --resource-group rg-lofi-books-prod --location eastus
-   ```
-
-3. Grant it Key Vault Secrets User role for its secrets
-
-4. Create K8s manifests (copy `infrastructure/k8s/` as a template, update names)
-
-5. Add an Ingress rule for `mynewapp.sm2gk.com` (references same `letsencrypt-prod` ClusterIssuer)
-
-6. Add DNS A record in GoDaddy pointing to the same ingress IP
-
-TLS cert is issued automatically. No changes to existing infrastructure needed.
+# Add a second node (horizontal scale)
+az aks nodepool scale \
+  --resource-group rg-sm2gk --cluster-name aks-sm2gk \
+  --name nodepool1 --node-count 2
+```

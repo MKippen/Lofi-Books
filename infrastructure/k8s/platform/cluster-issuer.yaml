@@ -1,0 +1,17 @@
+# Shared ClusterIssuer — manages TLS certificates for ALL apps on this cluster.
+# Any new app's Ingress just references: cert-manager.io/cluster-issuer: letsencrypt-prod
+# cert-manager auto-renews all certs 30 days before expiry — zero manual cert management.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: mike@sm2gk.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx

@@ -1,69 +1,69 @@
-# Security Architecture
+# Security Architecture — SM2GK Platform
 
 ## Credential Philosophy: Zero Rotation, MSI-First
-
-This deployment is designed so you **never need to rotate credentials**:
 
 | Credential | Mechanism | Rotation |
 |-----------|-----------|----------|
 | AKS → ACR | MSI (kubelet identity, AcrPull role) | None needed |
-| AKS pod → Key Vault | Workload Identity MSI | None needed |
+| AKS pod → Key Vault | Workload Identity MSI per app+env | None needed |
 | GitHub Actions → Azure | OIDC federation (no client secret) | None needed |
-| TLS certificates | cert-manager + Let's Encrypt | Automatic (30 days before expiry) |
-| JWT validation keys | JWKS public keys (jwks-rsa client caches) | Microsoft rotates, our code follows |
-| OpenAI API key | Stored in Key Vault once | None (key doesn't expire) |
+| TLS certificates | cert-manager + Let's Encrypt | Automatic (30d before expiry) |
+| JWT validation keys | JWKS public keys (cached, auto-follows Microsoft rotation) | None needed |
+| OpenAI API key | Stored once in Key Vault | None (key doesn't expire) |
 
-## JWT Authentication
+## Platform Isolation
 
-The backend validates Microsoft ID tokens:
-- **JWKS URI**: `https://login.microsoftonline.com/consumers/discovery/v2.0/keys`
-- **Audience**: `MSAL_CLIENT_ID` (the Entra app client ID)
-- **Issuer**: `https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0`
-- **Algorithm**: RS256
+Each app+env has its own:
+- **MSI** (`id-lofibooks-prod`, `id-lofibooks-preprod`) — separate Azure identities
+- **K8s Namespace** — network policies enforce namespace-level isolation
+- **Key Vault secrets** — prefixed `<app>-<env>-*` for logical separation
+  (full secret-level RBAC scoping is future work when Azure RBAC for KV secrets is GA)
+- **SecretProviderClass** — each references only its own prefixed secrets
 
-The `jwks-rsa` client caches public keys and re-fetches them when Microsoft rotates.
-No client secret involved — validation uses asymmetric public keys only.
+## Network Policies (per namespace)
 
-## Workload Identity (MSI)
+```
+Default: deny all ingress
+Allow: ingress-nginx → frontend:80
+Allow: ingress-nginx → backend:3001
+Allow: backend → all egress (OpenAI, Graph, Key Vault, DNS)
+Block: frontend → backend directly (must go through ingress)
+Block: cross-namespace pod communication
+```
 
-The backend pod uses Azure Workload Identity to access Key Vault:
-1. Pod has label `azure.workload.identity/use: "true"`
-2. ServiceAccount annotated with `azure.workload.identity/client-id: <MSI-client-id>`
-3. AKS OIDC issuer issues a projected service account token
-4. The Workload Identity mutating webhook injects env vars + volume mount
-5. The CSI Secret Store driver uses the token to authenticate to Key Vault
+## JWT Authentication (Lofibooks backend)
 
-**Result**: No credentials in pod spec, environment variables, or code. Secrets arrive as files at `/mnt/secrets-store/` and as a K8s Secret `lofi-books-env-secrets`.
+- Token type: MSAL **ID token** (aud: clientId, RS256)
+- JWKS URI: `https://login.microsoftonline.com/consumers/discovery/v2.0/keys`
+- Validation: `jsonwebtoken` + `jwks-rsa` with 10-min key cache
+- Microsoft rotates JWKS keys; the `jwks-rsa` client follows automatically — no action needed
+- Health endpoint `/api/health` is excluded from auth (used by K8s probes)
 
-## Network Policies
+## Workload Identity Flow
 
-Default deny-all ingress in the `lofi-books` namespace:
-- ✅ ingress-nginx → frontend (port 80)
-- ✅ ingress-nginx → backend (port 3001)
-- ✅ backend → external (all egress: OpenAI, Graph, Key Vault, DNS)
-- ❌ frontend → backend directly (blocked — all traffic routes through ingress)
-- ❌ Any pod from other namespaces reaching lofi-books pods
-
-## Encryption
-
-- **In transit**: TLS everywhere (Let's Encrypt cert via cert-manager)
-- **At rest**: Azure Managed Disk uses AES-256 with platform-managed keys
-
-## CORS
-
-Restricted to `https://lofibooks.sm2gk.com` via `ALLOWED_ORIGINS` env var.
-In local dev (no env var set), defaults to localhost:5174/5173.
+```
+Pod label: azure.workload.identity/use=true
+SA annotation: azure.workload.identity/client-id=<msi-client-id>
+  ↓
+Workload Identity mutating webhook injects projected SA token
+  ↓
+CSI Secret Store driver uses token → authenticates to Key Vault (no secret)
+  ↓
+Secrets mounted at /mnt/secrets-store/ and synced to K8s Secret
+  ↓
+Pod reads OPENAI_API_KEY + MSAL_CLIENT_ID from env vars
+```
 
 ## Container Security
 
-- Backend: runs as non-root user (`appuser`, UID 1001)
-- `allowPrivilegeEscalation: false` on backend container
+- Backend: non-root user (`appuser`, UID 1001), `runAsNonRoot: true`
+- `allowPrivilegeEscalation: false` on all containers
 - `seccompProfile: RuntimeDefault` on all pods
-- Resource limits set on all containers
+- Resource limits set to prevent one pod from starving others
 
-## Entra App Registration
+## TLS
 
-- Client type: Public (SPA) — no client secret
-- Redirect URIs: `https://lofibooks.sm2gk.com/`, `http://localhost:5174`
-- ID token issuance: enabled (used as Bearer token for API auth)
-- Scopes requested: `User.Read`, `Files.ReadWrite` (for OneDrive backup)
+- cert-manager + Let's Encrypt (HTTP-01 challenge via NGINX)
+- Shared `letsencrypt-prod` ClusterIssuer across all apps
+- HSTS header: `max-age=31536000; includeSubDomains`
+- Auto-renewal 30 days before expiry — zero manual cert management ever

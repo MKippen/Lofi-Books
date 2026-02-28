@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lofibooks-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            - name: ALLOWED_ORIGINS
+              value: "https://preprod.lofibooks.sm2gk.com"
+            - name: NODE_ENV
+              value: "production"

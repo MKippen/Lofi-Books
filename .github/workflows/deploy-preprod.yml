@@ -1,0 +1,88 @@
+name: Deploy — lofibooks preprod
+
+on:
+  push:
+    branches: [releasev1]
+
+env:
+  APP: lofibooks
+  K8S_NAMESPACE: lofibooks-preprod
+
+permissions:
+  id-token: write   # OIDC token for Azure login (no stored credentials)
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build & push to ACR
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.tag.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC — no stored credentials)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - id: tag
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push frontend
+        run: |
+          docker build \
+            --build-arg VITE_MSAL_CLIENT_ID=${{ secrets.VITE_MSAL_CLIENT_ID }} \
+            --build-arg VITE_MSAL_AUTHORITY=${{ secrets.VITE_MSAL_AUTHORITY }} \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ steps.tag.outputs.sha }} \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:preprod-latest \
+            .
+          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend --all-tags
+
+      - name: Build & push api
+        run: |
+          docker build \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ steps.tag.outputs.sha }} \
+            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:preprod-latest \
+            server/
+          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api --all-tags
+
+  deploy:
+    name: Deploy to lofibooks-preprod
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: lofibooks-preprod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
+            --name ${{ vars.AKS_CLUSTER }} --overwrite-existing
+
+      - name: Roll out images
+        run: |
+          kubectl set image deployment/${{ env.APP }}-frontend \
+            frontend=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ needs.build-and-push.outputs.image-tag }} \
+            -n ${{ env.K8S_NAMESPACE }}
+          kubectl set image deployment/${{ env.APP }}-api \
+            api=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ needs.build-and-push.outputs.image-tag }} \
+            -n ${{ env.K8S_NAMESPACE }}
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/${{ env.APP }}-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=120s
+          kubectl rollout status deployment/${{ env.APP }}-api -n ${{ env.K8S_NAMESPACE }} --timeout=120s

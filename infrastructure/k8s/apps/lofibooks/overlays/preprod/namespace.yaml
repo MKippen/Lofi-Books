@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lofibooks-preprod
+  labels:
+    app.kubernetes.io/part-of: lofibooks
+    environment: preprod

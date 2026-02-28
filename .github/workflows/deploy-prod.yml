@@ -1,0 +1,89 @@
+name: Deploy — lofibooks prod
+
+on:
+  push:
+    branches: [main]
+
+env:
+  APP: lofibooks
+  K8S_NAMESPACE: lofibooks
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  promote:
+    name: Promote preprod image to prod (no rebuild)
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.tag.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - id: tag
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Re-tag the same image SHA with prod-latest — no rebuild
+      - name: Promote frontend image
+        run: |
+          az acr import \
+            --name ${{ vars.ACR_NAME }} \
+            --source ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ steps.tag.outputs.sha }} \
+            --image ${{ env.APP }}-frontend:prod-latest \
+            --force
+
+      - name: Promote api image
+        run: |
+          az acr import \
+            --name ${{ vars.ACR_NAME }} \
+            --source ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ steps.tag.outputs.sha }} \
+            --image ${{ env.APP }}-api:prod-latest \
+            --force
+
+  deploy:
+    name: Deploy to lofibooks (prod)
+    needs: promote
+    runs-on: ubuntu-latest
+    environment: lofibooks-prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
+            --name ${{ vars.AKS_CLUSTER }} --overwrite-existing
+
+      - name: Roll out images
+        run: |
+          kubectl set image deployment/${{ env.APP }}-frontend \
+            frontend=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ needs.promote.outputs.image-tag }} \
+            -n ${{ env.K8S_NAMESPACE }}
+          kubectl set image deployment/${{ env.APP }}-api \
+            api=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ needs.promote.outputs.image-tag }} \
+            -n ${{ env.K8S_NAMESPACE }}
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/${{ env.APP }}-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=120s
+          kubectl rollout status deployment/${{ env.APP }}-api -n ${{ env.K8S_NAMESPACE }} --timeout=120s
+
+      - name: Verify health
+        run: |
+          kubectl wait --for=condition=ready pod \
+            -l app=${{ env.APP }}-api -n ${{ env.K8S_NAMESPACE }} --timeout=60s

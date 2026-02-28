@@ -1,79 +1,83 @@
-# Architecture — Lofi-Books on AKS
+# SM2GK Platform Architecture
 
 ## Overview
 
-Lofi-Books is a React 19 + Express.js full-stack writing tool deployed to Azure Kubernetes Service at `lofibooks.sm2gk.com`. The AKS cluster is a **shared platform** — multiple apps can be hosted at different subdomains by adding new namespaces.
+The SM2GK platform is a generic Azure Kubernetes Service cluster at `aks-sm2gk` that hosts
+multiple apps as isolated namespaces. Lofibooks is one app; zeroproof, and others will follow.
+Infrastructure naming is app-agnostic. Apps are isolated via namespaces, network policies,
+and per-app MSIs with minimal Key Vault access.
+
+## Platform Components
+
+```
+rg-sm2gk (Resource Group)
+├── aks-sm2gk          — Single AKS cluster (all apps, prod + preprod namespaces)
+├── acrsm2gk           — Container registry (all app images)
+├── kv-sm2gk           — Key Vault (all app secrets, prefixed by app+env)
+└── law-sm2gk          — Log Analytics (all cluster logs)
+```
+
+## Cluster Namespace Layout
+
+```
+aks-sm2gk:
+  ingress-nginx/           ← Shared NGINX Ingress Controller (1 LoadBalancer IP)
+  cert-manager/            ← Shared cert-manager + ClusterIssuer (Let's Encrypt)
+  lofibooks/               ← lofibooks PROD  → lofibooks.sm2gk.com
+  lofibooks-preprod/       ← lofibooks PREPROD → preprod.lofibooks.sm2gk.com
+  zeroproof/               ← [future] zeroproof PROD
+  zeroproof-preprod/       ← [future] zeroproof PREPROD
+```
 
 ## Request Flow
 
 ```
-User Browser
-  ↓ HTTPS (Let's Encrypt cert, auto-renewed by cert-manager)
-Azure Load Balancer (static IP, GoDaddy A record)
-  ↓
-NGINX Ingress Controller (ingress-nginx namespace)
-  ├─ /api/* ──→ lofi-books-api Service (ClusterIP :3001)
-  │               → lofi-books-api Pod (Express.js)
-  │                 → /data/lofi-books.db (SQLite, Azure Managed Disk PV)
-  │                 → /data/images/ (image files, same PV)
-  │                 → Key Vault secrets via CSI driver (OPENAI_API_KEY, MSAL_CLIENT_ID)
-  │                 → OpenAI API (external, HTTPS)
-  │                 → Microsoft Graph API (OneDrive backup, HTTPS)
-  │
-  └─ /* ─────→ lofi-books-frontend Service (ClusterIP :80)
-                  → lofi-books-frontend Pod (nginx serving Vite SPA)
+User → HTTPS → GoDaddy A record → Azure Load Balancer (single IP)
+  → NGINX Ingress Controller
+    → lofibooks.sm2gk.com /api → lofibooks/lofibooks-api   (port 3001, Express.js)
+    → lofibooks.sm2gk.com /    → lofibooks/lofibooks-frontend (port 80, nginx SPA)
+    → preprod.lofibooks.sm2gk.com → lofibooks-preprod/...
 ```
 
-## Authentication Flow
+## Key Vault Secret Naming
 
+Secrets are prefixed to isolate apps and environments in the shared vault:
 ```
-1. User visits https://lofibooks.sm2gk.com/
-2. MSAL (Microsoft Authentication Library) redirects to Microsoft login
-3. User authenticates with personal Microsoft account (consumers tenant)
-4. MSAL stores tokens in localStorage
-5. Every API call:
-   a. Frontend: msalInstance.acquireTokenSilent() → ID token (aud: clientId)
-   b. Frontend: sends Authorization: Bearer <id-token> header
-   c. Backend: requireAuth middleware validates token via JWKS public keys
-   d. Backend: extracts userId (oid claim) from validated token
-   e. Backend: uses userId to isolate user's books/data in SQLite
+lofibooks-prod-openai-api-key
+lofibooks-prod-msal-client-id
+lofibooks-preprod-openai-api-key
+lofibooks-preprod-msal-client-id
+zeroproof-prod-stripe-key       ← future
 ```
 
-**Why ID token?** The app uses a Public Client (SPA), so access tokens for Graph have `aud: graph.microsoft.com`. The ID token has `aud: clientId`, making it directly validatable by the backend without any shared secret.
+Each app's MSI (`id-lofibooks-prod`, `id-lofibooks-preprod`) has `Key Vault Secrets User`
+role on the vault — can read ALL secrets. Future: scope to secret-level RBAC when GA.
 
-## Data Storage
-
-- **Database**: SQLite at `/data/lofi-books.db` (WAL mode for performance)
-- **Images**: Binary files at `/data/images/`
-- **PV**: Azure Managed Disk (4 GiB Standard HDD, ReadWriteOnce)
-- **Encryption**: AES-256 at rest, managed by Azure (platform-managed keys)
-- **Replica strategy**: `Recreate` (not RollingUpdate) — SQLite is single-writer
-
-## Namespace Design (Multi-App)
+## Authentication (Lofibooks)
 
 ```
-ingress-nginx/        ← Shared NGINX Ingress Controller
-cert-manager/         ← Shared cert-manager (ClusterIssuer: letsencrypt-prod)
-lofi-books/           ← App namespace: lofi-books
-  pods: frontend, api
-  network policy: default-deny ingress, allow only from ingress-nginx
-future-app/           ← Next app: its own namespace, MSI, secrets
+1. User logs in with Microsoft personal account (MSAL, consumers tenant)
+2. MSAL stores ID token in localStorage
+3. Every API call sends: Authorization: Bearer <id-token>
+4. Backend validates: JWKS public keys from Microsoft (no stored secrets, no rotation)
+5. Backend extracts: userId from 'oid' claim → per-user SQLite isolation
 ```
 
-Adding a new app:
-1. Create namespace + workload MSI
-2. Add app's secrets to Key Vault
-3. Create K8s manifests (deployment, service, pvc, network-policy)
-4. Add `host` + `path` rules to the shared ingress OR create a new Ingress with same ingressClass
-5. cert-manager issues TLS cert automatically
+## CI/CD Flow
 
-## Component Versions
+```
+releasev1 push → CI tests → build images → deploy to lofibooks-preprod
+main push      → promote same image (no rebuild) → deploy to lofibooks (prod)
+```
 
-| Component | Version |
-|-----------|---------|
-| Kubernetes | 1.29 |
-| Node (runtime) | 22-alpine |
-| nginx (frontend) | 1.27-alpine |
-| NGINX Ingress | latest (Helm) |
-| cert-manager | latest (Helm) |
-| MSAL Browser | v5 |
+Images are tagged by git SHA and promoted between environments — what runs in preprod
+is exactly what runs in prod.
+
+## Adding a New App (e.g., zeroproof)
+
+1. Create `infrastructure/bicep/apps/zeroproof/identity.bicep`
+2. Create `infrastructure/k8s/apps/zeroproof/base/` + `overlays/prod/` + `overlays/preprod/`
+3. Add `.github/workflows/deploy-zeroproof-preprod.yml` + `deploy-zeroproof-prod.yml`
+4. Run `deploy-app.sh zeroproof prod` + `deploy-app.sh zeroproof preprod`
+5. Add A record in GoDaddy pointing `zeroproof.sm2gk.com` to the same ingress IP
+6. cert-manager issues TLS cert automatically

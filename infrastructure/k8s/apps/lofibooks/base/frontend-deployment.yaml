@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lofibooks-frontend
+  labels:
+    app: lofibooks-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lofibooks-frontend
+  template:
+    metadata:
+      labels:
+        app: lofibooks-frontend
+    spec:
+      containers:
+        - name: frontend
+          # Image tag is patched per overlay via kustomize images transformer
+          image: acrsm2gk.azurecr.io/lofibooks-frontend:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

@@ -1,0 +1,9 @@
+# ServiceAccount annotated with the prod MSI client ID.
+# ${WORKLOAD_IDENTITY_CLIENT_ID} is substituted by deploy-app.sh via envsubst.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sa-lofibooks
+  namespace: lofibooks
+  annotations:
+    azure.workload.identity/client-id: "${WORKLOAD_IDENTITY_CLIENT_ID}"

@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lofibooks-api
+  labels:
+    app: lofibooks-api
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # SQLite is single-writer — never run two pods simultaneously
+  selector:
+    matchLabels:
+      app: lofibooks-api
+  template:
+    metadata:
+      labels:
+        app: lofibooks-api
+        azure.workload.identity/use: "true"  # Enables Workload Identity MSI injection
+    spec:
+      serviceAccountName: sa-lofibooks  # Patched per overlay with correct MSI client-id annotation
+      containers:
+        - name: api
+          # Image tag is patched per overlay via kustomize images transformer
+          image: acrsm2gk.azurecr.io/lofibooks-api:latest
+          ports:
+            - containerPort: 3001
+          env:
+            - name: PORT
+              value: "3001"
+            - name: DATA_DIR
+              value: "/data"
+            - name: NODE_ENV
+              value: "production"
+            # ALLOWED_ORIGINS and other env-specific values are patched per overlay
+            - name: ALLOWED_ORIGINS
+              value: "https://lofibooks.sm2gk.com"  # Overridden in preprod overlay
+            # Secrets injected from Key Vault via CSI driver (not stored in manifest)
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lofibooks-secrets
+                  key: OPENAI_API_KEY
+            - name: MSAL_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: lofibooks-secrets
+                  key: MSAL_CLIENT_ID
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1001  # appuser created in Dockerfile
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: lofibooks-data
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: lofibooks-secrets
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

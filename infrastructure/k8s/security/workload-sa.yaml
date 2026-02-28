@@ -1,9 +1,0 @@
-# Kubernetes ServiceAccount annotated with the Workload Identity client ID.
-# The actual client ID placeholder is substituted by setup-azure.sh after Bicep deploys.
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: lofi-books-workload-sa
-  namespace: lofi-books
-  annotations:
-    azure.workload.identity/client-id: "${WORKLOAD_IDENTITY_CLIENT_ID}"
