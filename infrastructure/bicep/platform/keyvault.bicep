@@ -17,7 +17,6 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true   // RBAC mode for fine-grained per-secret access
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: false
   }
 }
 
