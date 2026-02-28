@@ -22,10 +22,12 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',')
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
-// JWT validation on all routes except /api/health.
+// JWT validation on all routes except /api/health and image GET requests.
+// Image GETs are public: IDs are UUIDs only knowable via authenticated API calls.
 // Skipped when MSAL_CLIENT_ID is not configured (local dev without env set).
 app.use((req, res, next) => {
   if (req.path === '/api/health') return next();
+  if (req.method === 'GET' && req.path.startsWith('/api/images/')) return next();
   if (!process.env.MSAL_CLIENT_ID) return next();
   requireAuth(req, res, next);
 });
