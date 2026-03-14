@@ -6,12 +6,54 @@ import {
   type AuthenticationResult,
 } from '@azure/msal-browser'
 import { MsalProvider } from '@azure/msal-react'
+import { loginRequest } from './auth/msalConfig'
 import { msalInstance } from './auth/msalInstance'
+import { hasUsableAccountIdentity } from './auth/account'
 import App from './App'
 import './index.css'
 
 // Show a loading indicator while MSAL initializes
 const root = ReactDOM.createRoot(document.getElementById('root')!);
+
+function clearMsalCache() {
+  Object.keys(localStorage).forEach((key) => {
+    if (key.startsWith('msal.') || key.includes('msal')) localStorage.removeItem(key);
+  });
+  sessionStorage.clear();
+}
+
+function renderLoginFallback() {
+  root.render(
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 24, background: '#f8f4ee' }}>
+      <div style={{ textAlign: 'center', maxWidth: 420, background: 'white', padding: 32, borderRadius: 16, boxShadow: '0 10px 30px rgba(0,0,0,0.08)' }}>
+        <h1 style={{ color: '#6e5a7f', marginBottom: 8 }}>Lofi Books</h1>
+        <p style={{ color: '#666', marginBottom: 20 }}>Sign in with your Microsoft account to access your books and OneDrive backup.</p>
+        <button
+          onClick={() => {
+            msalInstance.loginRedirect(loginRequest).catch((error) => {
+              console.error('Login failed:', error);
+            });
+          }}
+          style={{ padding: '10px 20px', background: '#8B7EC8', color: 'white', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 600 }}
+        >
+          Sign in with Microsoft
+        </button>
+        <div style={{ marginTop: 12 }}>
+          <button
+            onClick={() => {
+              clearMsalCache();
+              window.location.reload();
+            }}
+            style={{ padding: '8px 16px', background: 'transparent', color: '#6e5a7f', border: '1px solid #d7cfe3', borderRadius: 10, cursor: 'pointer' }}
+          >
+            Clear cache and retry
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 root.render(
   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
     <div style={{ textAlign: 'center' }}>
@@ -30,20 +72,35 @@ msalInstance
   .initialize()
   .then(() => msalInstance.handleRedirectPromise())
   .then((response) => {
-    if (response) {
+    const isBypassAuth = import.meta.env.VITE_BYPASS_AUTH === 'true';
+
+    if (response && hasUsableAccountIdentity(response.account)) {
       msalInstance.setActiveAccount(response.account);
     } else {
-      const accounts = msalInstance.getAllAccounts();
-      if (accounts.length > 0) {
-        msalInstance.setActiveAccount(accounts[0]);
+      const account = msalInstance.getAllAccounts().find(hasUsableAccountIdentity);
+      if (account) {
+        msalInstance.setActiveAccount(account);
       }
+    }
+
+    const activeAccount = msalInstance.getActiveAccount();
+
+    if (!isBypassAuth && !hasUsableAccountIdentity(activeAccount)) {
+      const hasAnyAccounts = msalInstance.getAllAccounts().length > 0;
+      if (hasAnyAccounts) {
+        clearMsalCache();
+      }
+      renderLoginFallback();
+      return;
     }
 
     // Listen for login success
     msalInstance.addEventCallback((event) => {
       if (event.eventType === EventType.LOGIN_SUCCESS && event.payload) {
         const result = event.payload as AuthenticationResult;
-        msalInstance.setActiveAccount(result.account);
+        if (hasUsableAccountIdentity(result.account)) {
+          msalInstance.setActiveAccount(result.account);
+        }
       }
     });
 
@@ -64,10 +121,7 @@ msalInstance
 
     // Auto-clear stale cache errors
     if (msg.includes('no_token_request_cache_error') || msg.includes('interaction_in_progress')) {
-      Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith('msal.') || key.includes('msal')) localStorage.removeItem(key);
-      });
-      sessionStorage.clear();
+      clearMsalCache();
       window.location.reload();
       return;
     }
@@ -79,10 +133,7 @@ msalInstance
           <p style={{ color: '#666', fontSize: 14, marginBottom: 16 }}>{msg}</p>
           <button
             onClick={() => {
-              Object.keys(localStorage).forEach((key) => {
-                if (key.startsWith('msal.') || key.includes('msal')) localStorage.removeItem(key);
-              });
-              sessionStorage.clear();
+              clearMsalCache();
               window.location.reload();
             }}
             style={{ padding: '8px 24px', background: '#8B7EC8', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' }}
@@ -93,4 +144,3 @@ msalInstance
       </div>
     );
   });
-

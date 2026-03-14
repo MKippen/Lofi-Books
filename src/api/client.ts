@@ -1,16 +1,40 @@
 import { msalInstance } from '@/auth/msalInstance';
 import { loginRequest } from '@/auth/msalConfig';
+import { getAccountUserId, hasUsableAccountIdentity } from '@/auth/account';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api';
+const DEV_BYPASS_USER_ID = 'local-dev';
 
-/** Get the current user's unique ID from MSAL (Azure AD OID). */
+function getCurrentAccount() {
+  const activeAccount = msalInstance.getActiveAccount();
+  if (hasUsableAccountIdentity(activeAccount)) {
+    return activeAccount;
+  }
+
+  return msalInstance.getAllAccounts().find(hasUsableAccountIdentity) ?? null;
+}
+
+/** Get the current user's unique ID from MSAL, preferring OID/SUB to match the server. */
 function getUserId(): string {
-  return msalInstance.getActiveAccount()?.localAccountId ?? '';
+  if (import.meta.env.VITE_BYPASS_AUTH === 'true') {
+    return DEV_BYPASS_USER_ID;
+  }
+  return getAccountUserId(getCurrentAccount());
+}
+
+function getLegacyUserIds(): string {
+  if (import.meta.env.VITE_BYPASS_AUTH === 'true') return '';
+  const account = getCurrentAccount();
+  if (!account) return '';
+
+  return Array.from(
+    new Set([account.localAccountId, account.homeAccountId].filter((value): value is string => Boolean(value))),
+  ).join(',');
 }
 
 /** Acquire an ID token silently for Bearer auth. ID token has aud:clientId — validatable server-side. */
 async function getBearerToken(): Promise<string> {
-  const account = msalInstance.getActiveAccount();
+  const account = getCurrentAccount();
   if (!account) return '';
   try {
     const result = await msalInstance.acquireTokenSilent({ ...loginRequest, account });
@@ -28,6 +52,7 @@ export async function getAuthHeaders(
 
   return {
     'X-User-Id': getUserId(),
+    'X-Legacy-User-Ids': getLegacyUserIds(),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(headers as Record<string, string>),
   };

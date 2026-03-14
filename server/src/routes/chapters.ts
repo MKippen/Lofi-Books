@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { execute, queryRow } from '../db.js';
+import { asyncHandler } from '../http.js';
 import { toCamel, camelToSnake } from '../util.js';
 
 export const chaptersRouter = Router();
@@ -8,28 +9,26 @@ const ALLOWED_FIELDS = new Set([
   'title', 'content', 'sortOrder', 'wordCount', 'status', 'notes',
 ]);
 
-// Helper: find chapter and verify ownership through book → user_id
-function findOwnedChapter(req: any): Record<string, unknown> | null {
+async function findOwnedChapter(req: any): Promise<Record<string, unknown> | null> {
   const userId = req.userId as string;
-  const row = db.prepare(`
-    SELECT c.* FROM chapters c
-    JOIN books b ON b.id = c.book_id
-    WHERE c.id = ? AND b.user_id = ?
-  `).get(req.params.id, userId) as Record<string, unknown> | undefined;
-  return row ?? null;
+  const row = await queryRow(
+    `SELECT c.* FROM chapters c
+     JOIN books b ON b.id = c.book_id
+     WHERE c.id = $1 AND b.user_id = $2`,
+    [req.params.id, userId],
+  ) as Record<string, unknown> | null;
+  return row;
 }
 
-// Get single chapter
-chaptersRouter.get('/:id', (req, res) => {
-  const chapter = findOwnedChapter(req);
+chaptersRouter.get('/:id', asyncHandler(async (req, res) => {
+  const chapter = await findOwnedChapter(req);
   if (!chapter) return res.status(404).json({ error: 'Chapter not found' });
   res.json(toCamel(chapter));
-});
+}));
 
-// Update chapter
-chaptersRouter.put('/:id', (req, res) => {
+chaptersRouter.put('/:id', asyncHandler(async (req, res) => {
   const now = new Date().toISOString();
-  const existing = findOwnedChapter(req);
+  const existing = await findOwnedChapter(req);
   if (!existing) return res.status(404).json({ error: 'Chapter not found' });
 
   const fields: string[] = [];
@@ -37,22 +36,19 @@ chaptersRouter.put('/:id', (req, res) => {
 
   for (const [key, value] of Object.entries(req.body)) {
     if (!ALLOWED_FIELDS.has(key)) continue;
-    const col = camelToSnake(key);
-    fields.push(`${col} = ?`);
     values.push(value);
+    fields.push(`${camelToSnake(key)} = $${values.length}`);
   }
-  fields.push('updated_at = ?');
-  values.push(now);
-  values.push(req.params.id);
+  fields.push(`updated_at = $${values.length + 1}`);
+  values.push(now, req.params.id);
 
-  db.prepare(`UPDATE chapters SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  await execute(`UPDATE chapters SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
   res.json({ ok: true });
-});
+}));
 
-// Delete chapter
-chaptersRouter.delete('/:id', (req, res) => {
-  const existing = findOwnedChapter(req);
+chaptersRouter.delete('/:id', asyncHandler(async (req, res) => {
+  const existing = await findOwnedChapter(req);
   if (!existing) return res.status(404).json({ error: 'Chapter not found' });
-  db.prepare('DELETE FROM chapters WHERE id = ?').run(req.params.id);
+  await execute('DELETE FROM chapters WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
-});
+}));

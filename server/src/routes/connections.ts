@@ -1,26 +1,26 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { execute, queryRow } from '../db.js';
+import { asyncHandler } from '../http.js';
 import { camelToSnake } from '../util.js';
 
 export const connectionsRouter = Router();
 
 const ALLOWED_FIELDS = new Set(['color']);
 
-// Helper: find connection and verify ownership through book → user_id
-function findOwnedConnection(req: any): Record<string, unknown> | null {
+async function findOwnedConnection(req: any): Promise<Record<string, unknown> | null> {
   const userId = req.userId as string;
-  const row = db.prepare(`
-    SELECT c.* FROM connections c
-    JOIN books b ON b.id = c.book_id
-    WHERE c.id = ? AND b.user_id = ?
-  `).get(req.params.id, userId) as Record<string, unknown> | undefined;
-  return row ?? null;
+  const row = await queryRow(
+    `SELECT c.* FROM connections c
+     JOIN books b ON b.id = c.book_id
+     WHERE c.id = $1 AND b.user_id = $2`,
+    [req.params.id, userId],
+  ) as Record<string, unknown> | null;
+  return row;
 }
 
-// Update connection (e.g. change color)
-connectionsRouter.put('/:id', (req, res) => {
+connectionsRouter.put('/:id', asyncHandler(async (req, res) => {
   const now = new Date().toISOString();
-  const existing = findOwnedConnection(req);
+  const existing = await findOwnedConnection(req);
   if (!existing) return res.status(404).json({ error: 'Connection not found' });
 
   const fields: string[] = [];
@@ -28,22 +28,19 @@ connectionsRouter.put('/:id', (req, res) => {
 
   for (const [key, value] of Object.entries(req.body)) {
     if (!ALLOWED_FIELDS.has(key)) continue;
-    const col = camelToSnake(key);
-    fields.push(`${col} = ?`);
     values.push(value);
+    fields.push(`${camelToSnake(key)} = $${values.length}`);
   }
-  fields.push('updated_at = ?');
-  values.push(now);
-  values.push(req.params.id);
+  fields.push(`updated_at = $${values.length + 1}`);
+  values.push(now, req.params.id);
 
-  db.prepare(`UPDATE connections SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  await execute(`UPDATE connections SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
   res.json({ ok: true });
-});
+}));
 
-// Delete connection
-connectionsRouter.delete('/:id', (req, res) => {
-  const existing = findOwnedConnection(req);
+connectionsRouter.delete('/:id', asyncHandler(async (req, res) => {
+  const existing = await findOwnedConnection(req);
   if (!existing) return res.status(404).json({ error: 'Connection not found' });
-  db.prepare('DELETE FROM connections WHERE id = ?').run(req.params.id);
+  await execute('DELETE FROM connections WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
-});
+}));

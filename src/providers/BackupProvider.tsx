@@ -1,10 +1,19 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useOneDriveBackup } from '@/hooks/useOneDriveBackup';
 import { useAuth } from '@/hooks/useAuth';
-import { checkHasData, getRemoteMetadata, restoreFromBackup, hasLegacyDexieData, readLegacyDexieData, importLocalData, deleteLegacyDexieDB } from '@/api/backup';
+import {
+  checkHasData,
+  getRemoteMetadata,
+  listBackups,
+  restoreFromBackup,
+  hasLegacyDexieData,
+  readLegacyDexieData,
+  importLocalData,
+  deleteLegacyDexieDB,
+} from '@/api/backup';
 import { notifyChange } from '@/api/notify';
 import type { BackupState } from '@/types';
-import type { RemoteMetadata } from '@/api/backup';
+import type { BackupFileSummary, RemoteMetadata } from '@/api/backup';
 import RestoreDialog from '@/components/ui/RestoreDialog';
 
 interface BackupContextValue {
@@ -39,6 +48,8 @@ export default function BackupProvider({ children }: BackupProviderProps) {
   // Restore dialog state
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
   const [remoteMetadata, setRemoteMetadata] = useState<RemoteMetadata | null>(null);
+  const [availableBackups, setAvailableBackups] = useState<BackupFileSummary[]>([]);
+  const [selectedBackupName, setSelectedBackupName] = useState<string>('');
   const [isRestoring, setIsRestoring] = useState(false);
   const [checkedFirstLoad, setCheckedFirstLoad] = useState(false);
 
@@ -92,11 +103,16 @@ export default function BackupProvider({ children }: BackupProviderProps) {
           return;
         }
 
-        const meta = await getRemoteMetadata();
+        const [meta, backups] = await Promise.all([
+          getRemoteMetadata(),
+          listBackups(),
+        ]);
         if (cancelled) return;
 
-        if (meta && meta.bookCount > 0) {
+        if ((meta && meta.bookCount > 0) || backups.length > 0) {
           setRemoteMetadata(meta);
+          setAvailableBackups(backups);
+          setSelectedBackupName(selectPreferredBackup(backups));
           setShowRestoreDialog(true);
         }
       } catch (err) {
@@ -111,10 +127,14 @@ export default function BackupProvider({ children }: BackupProviderProps) {
   }, [isAuthenticated, isOneDriveConnected, checkedFirstLoad]);
 
   const handleRestore = useCallback(async () => {
+    if (!selectedBackupName) {
+      return;
+    }
+
     setIsRestoring(true);
     try {
       const token = await getAccessToken();
-      await restoreFromBackup(token);
+      await restoreFromBackup(token, selectedBackupName);
       setShowRestoreDialog(false);
       // Notify all hooks to re-fetch data
       notifyChange();
@@ -123,13 +143,18 @@ export default function BackupProvider({ children }: BackupProviderProps) {
     } finally {
       setIsRestoring(false);
     }
-  }, [getAccessToken]);
+  }, [getAccessToken, selectedBackupName]);
 
   const triggerRestore = useCallback(async () => {
     try {
-      const meta = await getRemoteMetadata();
-      if (meta) {
+      const [meta, backups] = await Promise.all([
+        getRemoteMetadata(),
+        listBackups(),
+      ]);
+      if (meta || backups.length > 0) {
         setRemoteMetadata(meta);
+        setAvailableBackups(backups);
+        setSelectedBackupName(selectPreferredBackup(backups));
         setShowRestoreDialog(true);
       }
     } catch (err) {
@@ -152,8 +177,17 @@ export default function BackupProvider({ children }: BackupProviderProps) {
         onClose={() => setShowRestoreDialog(false)}
         onRestore={handleRestore}
         metadata={remoteMetadata}
+        backups={availableBackups}
+        selectedBackupName={selectedBackupName}
+        onSelectBackup={setSelectedBackupName}
         isRestoring={isRestoring}
       />
     </BackupContext.Provider>
   );
+}
+
+function selectPreferredBackup(backups: BackupFileSummary[]): string {
+  return backups.find((backup) => !backup.isLatest)?.name
+    ?? backups[0]?.name
+    ?? '';
 }

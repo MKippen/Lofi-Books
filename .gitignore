@@ -3,3 +3,9 @@ dist
 .env
 .env.local
 certs/
+infrastructure/.platform-outputs.env
+server/.data/
+server/.env.prod-local
+server/.tmp-*
+server/prod-backup-export*
+server/prod-images-export*

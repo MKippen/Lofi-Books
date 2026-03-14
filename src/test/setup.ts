@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import { vi, beforeEach, afterEach } from 'vitest';
 
+vi.stubEnv('VITE_BYPASS_AUTH', 'false');
+
 // Mock import.meta.env
 vi.stubGlobal('import', {
   meta: {
@@ -14,10 +16,24 @@ vi.stubGlobal('import', {
 vi.mock('@/auth/msalInstance', () => ({
   msalInstance: {
     getActiveAccount: () => ({
-      localAccountId: 'test-user-id',
+      localAccountId: 'test-local-account-id',
+      homeAccountId: 'test-home-account-id',
       username: 'test@example.com',
+      name: 'Test User',
+      idTokenClaims: {
+        oid: 'test-oid',
+      },
     }),
-    acquireTokenSilent: () => Promise.resolve({ accessToken: 'mock-token' }),
+    getAllAccounts: () => ([{
+      localAccountId: 'test-local-account-id',
+      homeAccountId: 'test-home-account-id',
+      username: 'test@example.com',
+      name: 'Test User',
+      idTokenClaims: {
+        oid: 'test-oid',
+      },
+    }]),
+    acquireTokenSilent: () => Promise.resolve({ accessToken: 'mock-token', idToken: 'mock-id-token' }),
     loginPopup: () => Promise.resolve({}),
     loginRedirect: () => Promise.resolve(),
     logoutPopup: () => Promise.resolve(),

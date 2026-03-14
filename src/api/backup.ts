@@ -14,6 +14,13 @@ export interface RemoteMetadata {
   totalRecords: number;
 }
 
+export interface BackupFileSummary {
+  name: string;
+  size: number;
+  lastModified: string;
+  isLatest: boolean;
+}
+
 export interface HasDataResponse {
   hasData: boolean;
   bookCount: number;
@@ -45,10 +52,17 @@ export async function getRemoteMetadata(): Promise<RemoteMetadata | null> {
   return apiFetch<RemoteMetadata | null>('/backup/remote-meta');
 }
 
-export async function restoreFromBackup(accessToken: string): Promise<{ ok: boolean; bookCount: number; totalRecords: number }> {
+export async function listBackups(): Promise<BackupFileSummary[]> {
+  return apiFetch<BackupFileSummary[]>('/backup/list');
+}
+
+export async function restoreFromBackup(
+  accessToken: string,
+  filename?: string,
+): Promise<{ ok: boolean; bookCount: number; totalRecords: number }> {
   return apiFetch('/backup/restore', {
     method: 'POST',
-    body: JSON.stringify({ accessToken }),
+    body: JSON.stringify({ accessToken, filename }),
   });
 }
 

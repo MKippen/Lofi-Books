@@ -7,7 +7,6 @@ import { getRemoteMetadata } from '@/api/backup';
 import type { RemoteMetadata } from '@/api/backup';
 import { formatDistanceToNow } from 'date-fns';
 import Button from '@/components/ui/Button';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -16,7 +15,6 @@ export default function SettingsPage() {
 
   const [remoteMeta, setRemoteMeta] = useState<RemoteMetadata | null>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
-  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
 
   useEffect(() => {
     getRemoteMetadata()
@@ -24,11 +22,6 @@ export default function SettingsPage() {
       .catch(() => setRemoteMeta(null))
       .finally(() => setLoadingMeta(false));
   }, [state.lastBackupTime]);
-
-  const handleRestoreConfirm = () => {
-    setShowRestoreConfirm(false);
-    triggerRestore();
-  };
 
   return (
     <div className="min-h-screen bookshop-bg">
@@ -150,8 +143,8 @@ export default function SettingsPage() {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => setShowRestoreConfirm(true)}
-              disabled={!remoteMeta || !state.isOneDriveConnected}
+              onClick={triggerRestore}
+              disabled={!state.isOneDriveConnected}
             >
               <CloudDownload size={14} />
               Restore from OneDrive
@@ -165,25 +158,14 @@ export default function SettingsPage() {
           <div className="space-y-1">
             <p>
               Your data auto-saves to OneDrive as you work, similar to how Word saves documents.
-              Backups run automatically after you make changes.
+              Backups run automatically after you make changes, and restore now lets you choose a specific saved checkpoint.
             </p>
             <p>
-              <strong>Note:</strong> Image files are stored on the server and are not included in OneDrive backups.
-              Only book data, chapters, characters, and other text content is backed up.
+              <strong>Note:</strong> Image files are copied to OneDrive alongside book data, but the safest recovery point is still the timestamped backup you choose during restore.
             </p>
           </div>
         </div>
       </div>
-
-      <ConfirmDialog
-        isOpen={showRestoreConfirm}
-        onClose={() => setShowRestoreConfirm(false)}
-        onConfirm={handleRestoreConfirm}
-        title="Restore from OneDrive?"
-        message="This will replace all current data with the OneDrive backup. This cannot be undone."
-        confirmLabel="Restore"
-        variant="danger"
-      />
     </div>
   );
 }

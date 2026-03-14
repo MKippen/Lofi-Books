@@ -1,26 +1,26 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { execute, queryRow } from '../db.js';
+import { asyncHandler } from '../http.js';
 import { camelToSnake } from '../util.js';
 
 export const illustrationsRouter = Router();
 
 const ALLOWED_FIELDS = new Set(['caption', 'sortOrder']);
 
-// Helper: find illustration and verify ownership through book → user_id
-function findOwnedIllustration(req: any): Record<string, unknown> | null {
+async function findOwnedIllustration(req: any): Promise<Record<string, unknown> | null> {
   const userId = req.userId as string;
-  const row = db.prepare(`
-    SELECT ci.* FROM chapter_illustrations ci
-    JOIN books b ON b.id = ci.book_id
-    WHERE ci.id = ? AND b.user_id = ?
-  `).get(req.params.id, userId) as Record<string, unknown> | undefined;
-  return row ?? null;
+  const row = await queryRow(
+    `SELECT ci.* FROM chapter_illustrations ci
+     JOIN books b ON b.id = ci.book_id
+     WHERE ci.id = $1 AND b.user_id = $2`,
+    [req.params.id, userId],
+  ) as Record<string, unknown> | null;
+  return row;
 }
 
-// Update illustration (e.g. change caption)
-illustrationsRouter.put('/:id', (req, res) => {
+illustrationsRouter.put('/:id', asyncHandler(async (req, res) => {
   const now = new Date().toISOString();
-  const existing = findOwnedIllustration(req);
+  const existing = await findOwnedIllustration(req);
   if (!existing) return res.status(404).json({ error: 'Illustration not found' });
 
   const fields: string[] = [];
@@ -28,22 +28,19 @@ illustrationsRouter.put('/:id', (req, res) => {
 
   for (const [key, value] of Object.entries(req.body)) {
     if (!ALLOWED_FIELDS.has(key)) continue;
-    const col = camelToSnake(key);
-    fields.push(`${col} = ?`);
     values.push(value);
+    fields.push(`${camelToSnake(key)} = $${values.length}`);
   }
-  fields.push('updated_at = ?');
-  values.push(now);
-  values.push(req.params.id);
+  fields.push(`updated_at = $${values.length + 1}`);
+  values.push(now, req.params.id);
 
-  db.prepare(`UPDATE chapter_illustrations SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  await execute(`UPDATE chapter_illustrations SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
   res.json({ ok: true });
-});
+}));
 
-// Delete illustration
-illustrationsRouter.delete('/:id', (req, res) => {
-  const existing = findOwnedIllustration(req);
+illustrationsRouter.delete('/:id', asyncHandler(async (req, res) => {
+  const existing = await findOwnedIllustration(req);
   if (!existing) return res.status(404).json({ error: 'Illustration not found' });
-  db.prepare('DELETE FROM chapter_illustrations WHERE id = ?').run(req.params.id);
+  await execute('DELETE FROM chapter_illustrations WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
-});
+}));

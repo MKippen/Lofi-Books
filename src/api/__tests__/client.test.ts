@@ -7,8 +7,8 @@ describe('API client', () => {
   });
 
   describe('getUserId', () => {
-    it('returns the active MSAL account localAccountId', () => {
-      expect(getUserId()).toBe('test-user-id');
+    it('returns the active MSAL account oid when available', () => {
+      expect(getUserId()).toBe('test-oid');
     });
   });
 
@@ -33,7 +33,8 @@ describe('API client', () => {
       expect(url).toContain('/api/books');
       expect(options?.headers).toEqual(expect.objectContaining({
         'Content-Type': 'application/json',
-        'X-User-Id': 'test-user-id',
+        'X-User-Id': 'test-oid',
+        'X-Legacy-User-Ids': 'test-local-account-id,test-home-account-id',
       }));
     });
 

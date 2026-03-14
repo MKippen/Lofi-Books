@@ -50,10 +50,14 @@ export function useOneDriveBackup() {
         lastBackupError: status.lastBackupError,
         status: status.backupInProgress ? 'backing-up' : (status.lastBackupError ? 'error' : 'idle'),
       }));
+
+      if (!status.isConnected && isAuthenticated) {
+        await sendTokenToServer();
+      }
     } catch {
       // Server might not be reachable — don't overwrite state
     }
-  }, []);
+  }, [isAuthenticated, sendTokenToServer]);
 
   // Manual backup trigger
   const manualBackup = useCallback(async () => {

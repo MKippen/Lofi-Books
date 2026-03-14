@@ -6,17 +6,18 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "migrate:sqlite-to-postgres": "tsx src/scripts/migrateSqliteToPostgres.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^4.0.0",
     "multer": "^1.4.5-lts.2",
     "openai": "^6.22.0",
+    "pg": "^8.16.3",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
@@ -25,8 +26,11 @@
     "@types/express": "^5.0.2",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^1.4.12",
+    "@types/pg": "^8.15.5",
     "@types/supertest": "^6.0.3",
     "@types/uuid": "^10.0.0",
+    "better-sqlite3": "^11.7.0",
+    "pg-mem": "^3.0.5",
     "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

@@ -3,25 +3,53 @@ name: Deploy — lofibooks prod
 on:
   push:
     branches: [main]
-
-env:
-  APP: lofibooks
-  K8S_NAMESPACE: lofibooks
+  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  build-and-push:
-    name: Build & push to ACR
+  deploy:
+    name: Deploy lofibooks
     runs-on: ubuntu-latest
-    outputs:
-      image-tag: ${{ steps.tag.outputs.sha }}
+    environment: lofibooks-prod
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure login (OIDC — no stored credentials)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        env:
+          VITE_BYPASS_AUTH: "false"
+          VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
+          VITE_MSAL_AUTHORITY: ${{ secrets.VITE_MSAL_AUTHORITY }}
+          VITE_MSAL_REDIRECT_URI: https://lofibooks.sm2gk.com
+          VITE_MSAL_POST_LOGOUT_REDIRECT_URI: https://lofibooks.sm2gk.com
+        run: npm run build
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Build backend
+        run: npm run build
+        working-directory: server
+
+      - name: Azure login
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -29,71 +57,69 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: ACR login
-        run: az acr login --name ${{ vars.ACR_NAME }}
+        run: az acr login --name "${{ vars.ACR_NAME }}"
 
-      - id: tag
-        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Build & push frontend
-        env:
-          VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
-          VITE_MSAL_AUTHORITY: ${{ secrets.VITE_MSAL_AUTHORITY }}
+      - name: Build and push backend image
         run: |
+          TAG="$(git rev-parse --short HEAD)"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
           docker build \
-            --platform linux/amd64 \
-            --build-arg VITE_MSAL_CLIENT_ID="${VITE_MSAL_CLIENT_ID}" \
-            --build-arg VITE_MSAL_AUTHORITY="${VITE_MSAL_AUTHORITY}" \
-            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ steps.tag.outputs.sha }} \
-            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:prod-latest \
-            .
-          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend --all-tags
+            -f server/Dockerfile \
+            -t "${{ vars.ACR_LOGIN_SERVER }}/lofibooks-api:${TAG}" \
+            -t "${{ vars.ACR_LOGIN_SERVER }}/lofibooks-api:latest" \
+            server
+          docker push "${{ vars.ACR_LOGIN_SERVER }}/lofibooks-api:${TAG}"
+          docker push "${{ vars.ACR_LOGIN_SERVER }}/lofibooks-api:latest"
 
-      - name: Build & push api
+      - name: Snapshot Azure Files share before backend deploy
         run: |
-          docker build \
-            --platform linux/amd64 \
-            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ steps.tag.outputs.sha }} \
-            -t ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:prod-latest \
-            server/
-          docker push ${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api --all-tags
+          az storage share-rm snapshot \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --storage-account "${{ vars.STORAGE_ACCOUNT_NAME }}" \
+            --name "${{ vars.FILE_SHARE_NAME }}" \
+            --output none
 
-  deploy:
-    name: Deploy to lofibooks (prod)
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    environment: lofibooks-prod
-    steps:
-      - uses: actions/checkout@v4
+      - name: Reassert Container App ACR access
+        run: |
+          APP_PRINCIPAL_ID="$(az containerapp show \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --name "${{ vars.LOFIBOOKS_CONTAINER_APP_NAME }}" \
+            --query identity.principalId -o tsv)"
+          ACR_ID="$(az acr show --name "${{ vars.ACR_NAME }}" --query id -o tsv)"
 
-      - name: Azure login (OIDC)
-        uses: azure/login@v2
+          az role assignment create \
+            --assignee-object-id "$APP_PRINCIPAL_ID" \
+            --assignee-principal-type ServicePrincipal \
+            --role AcrPull \
+            --scope "$ACR_ID" \
+            --output none 2>/dev/null || true
+
+          az containerapp registry set \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --name "${{ vars.LOFIBOOKS_CONTAINER_APP_NAME }}" \
+            --server "${{ vars.ACR_LOGIN_SERVER }}" \
+            --identity system \
+            --output none
+
+      - name: Deploy backend to Container Apps
+        run: |
+          az containerapp update \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --name "${{ vars.LOFIBOOKS_CONTAINER_APP_NAME }}" \
+            --image "${{ vars.ACR_LOGIN_SERVER }}/lofibooks-api:${TAG}" \
+            --output none
+
+      - name: Deploy frontend to Static Web App
+        uses: Azure/static-web-apps-deploy@v1
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Get AKS credentials
-        run: |
-          az aks get-credentials \
-            --resource-group ${{ vars.AKS_RESOURCE_GROUP }} \
-            --name ${{ vars.AKS_CLUSTER }} \
-            --admin --overwrite-existing
-
-      - name: Roll out images
-        run: |
-          kubectl set image deployment/${{ env.APP }}-frontend \
-            frontend=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-frontend:${{ needs.build-and-push.outputs.image-tag }} \
-            -n ${{ env.K8S_NAMESPACE }}
-          kubectl set image deployment/${{ env.APP }}-api \
-            api=${{ vars.ACR_LOGIN_SERVER }}/${{ env.APP }}-api:${{ needs.build-and-push.outputs.image-tag }} \
-            -n ${{ env.K8S_NAMESPACE }}
-
-      - name: Wait for rollout
-        run: |
-          kubectl rollout status deployment/${{ env.APP }}-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=120s
-          kubectl rollout status deployment/${{ env.APP }}-api -n ${{ env.K8S_NAMESPACE }} --timeout=120s
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LOFIBOOKS }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          skip_app_build: true
+          app_location: dist
+          output_location: ""
 
       - name: Verify health
         run: |
-          sleep 5
+          sleep 10
           curl -sf https://lofibooks.sm2gk.com/api/health | grep ok

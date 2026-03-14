@@ -1,6 +1,7 @@
-import { useMsal, useAccount } from '@azure/msal-react';
+import { useMsal } from '@azure/msal-react';
 import { graphScopes } from '@/auth/msalConfig';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
+import { hasUsableAccountIdentity } from '@/auth/account';
 
 export type UserRole = 'admin' | 'user';
 
@@ -12,10 +13,17 @@ const ADMIN_EMAILS: string[] = [
 
 export function useAuth() {
   const { instance, accounts } = useMsal();
-  const account = useAccount(accounts[0] ?? null);
+  const account = instance.getActiveAccount() ?? accounts.find(hasUsableAccountIdentity) ?? null;
+  const isAuthenticated = hasUsableAccountIdentity(account);
+
+  useEffect(() => {
+    if (!instance.getActiveAccount() && account) {
+      instance.setActiveAccount(account);
+    }
+  }, [instance, account]);
 
   const getAccessToken = useCallback(async (): Promise<string> => {
-    if (!account) {
+    if (!isAuthenticated || !account) {
       throw new Error('No authenticated account');
     }
 
@@ -35,7 +43,7 @@ export function useAuth() {
         throw popupErr;
       }
     }
-  }, [instance, account]);
+  }, [instance, account, isAuthenticated]);
 
   const logout = useCallback(async () => {
     await instance.logoutRedirect();
@@ -45,13 +53,13 @@ export function useAuth() {
   const role: UserRole = ADMIN_EMAILS.includes(email.toLowerCase()) ? 'admin' : 'user';
 
   return {
-    account,
-    displayName: account?.name ?? account?.username ?? 'User',
-    email,
+    account: isAuthenticated ? account : null,
+    displayName: isAuthenticated ? (account?.name ?? account?.username ?? 'User') : '',
+    email: isAuthenticated ? email : '',
     role,
     isAdmin: role === 'admin',
     getAccessToken,
     logout,
-    isAuthenticated: !!account,
+    isAuthenticated,
   };
 }

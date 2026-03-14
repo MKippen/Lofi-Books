@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { imageUrl, uploadImage, deleteImageApi } from '../images';
 
+vi.mock('../client', async () => {
+  const actual = await vi.importActual<typeof import('../client')>('../client');
+  return {
+    ...actual,
+    getAuthHeaders: vi.fn(async () => ({ Authorization: 'Bearer test-token', 'X-User-Id': 'user-1' })),
+  };
+});
+
 describe('images API', () => {
   beforeEach(() => {
     vi.mocked(globalThis.fetch).mockReset();
@@ -33,6 +41,7 @@ describe('images API', () => {
       expect(url).toContain('/api/images/upload/book-1');
       expect(options?.method).toBe('POST');
       expect(options?.body).toBeInstanceOf(FormData);
+      expect(options?.headers).toEqual(expect.objectContaining({ Authorization: 'Bearer test-token' }));
     });
 
     it('throws on upload failure', async () => {
@@ -59,6 +68,7 @@ describe('images API', () => {
       const [url, options] = vi.mocked(globalThis.fetch).mock.calls[0];
       expect(url).toContain('/api/images/img-123');
       expect(options?.method).toBe('DELETE');
+      expect(options?.headers).toEqual(expect.objectContaining({ Authorization: 'Bearer test-token' }));
     });
 
     it('throws when server returns an error', async () => {

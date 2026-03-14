@@ -1,15 +1,21 @@
 import { type ReactNode } from 'react';
-import { useIsAuthenticated, useMsal } from '@azure/msal-react';
+import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import LoginPage from '@/features/auth/LoginPage';
+import { useAuth } from '@/hooks/useAuth';
 
 interface AuthGateProps {
   children: ReactNode;
 }
 
 export default function AuthGate({ children }: AuthGateProps) {
-  const isAuthenticated = useIsAuthenticated();
+  const isBypassAuth = import.meta.env.VITE_BYPASS_AUTH === 'true';
   const { inProgress } = useMsal();
+  const { isAuthenticated } = useAuth();
+
+  if (isBypassAuth) {
+    return <>{children}</>;
+  }
 
   if (inProgress !== InteractionStatus.None) {
     const label = inProgress === InteractionStatus.Startup ? 'Loading...' : 'Signing in...';

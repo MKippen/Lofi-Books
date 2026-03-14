@@ -1,16 +1,18 @@
-import Database, { type Database as DatabaseType } from 'better-sqlite3';
+import { newDb } from 'pg-mem';
 import os from 'os';
 import path from 'path';
+import type { PoolClient, QueryResultRow } from 'pg';
 
-const TEST_DATA_DIR = path.join(os.tmpdir(), 'lofi-books-test-data');
+const mem = newDb({
+  autoCreateForeignKeyIndices: true,
+});
 
-// Single in-memory database for the entire test suite
-// We clear tables between tests instead of creating a new db,
-// because ESM `import { db }` captures the reference at import time.
-const db: DatabaseType = new Database(':memory:');
-db.pragma('foreign_keys = ON');
+const adapter = mem.adapters.createPg();
+const pool = new adapter.Pool();
+const DATA_DIR = path.join(os.tmpdir(), 'lofi-books-test-data');
+const IMAGES_DIR = path.join(DATA_DIR, 'images');
 
-db.exec(`
+mem.public.none(`
   CREATE TABLE IF NOT EXISTS books (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -33,7 +35,7 @@ db.exec(`
     relationships TEXT NOT NULL DEFAULT '[]',
     special_abilities TEXT NOT NULL DEFAULT '[]',
     role TEXT NOT NULL DEFAULT 'supporting',
-    sort_order INTEGER NOT NULL DEFAULT 0,
+    sort_order BIGINT NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -43,8 +45,8 @@ db.exec(`
     book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     content TEXT NOT NULL DEFAULT '',
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    word_count INTEGER NOT NULL DEFAULT 0,
+    sort_order BIGINT NOT NULL DEFAULT 0,
+    word_count BIGINT NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'draft',
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -59,11 +61,11 @@ db.exec(`
     description TEXT NOT NULL DEFAULT '',
     image_id TEXT,
     color TEXT NOT NULL DEFAULT 'sakura-white',
-    position_x REAL NOT NULL DEFAULT 100,
-    position_y REAL NOT NULL DEFAULT 100,
-    width REAL NOT NULL DEFAULT 220,
-    height REAL NOT NULL DEFAULT 180,
-    z_index INTEGER NOT NULL DEFAULT 0,
+    position_x DOUBLE PRECISION NOT NULL DEFAULT 100,
+    position_y DOUBLE PRECISION NOT NULL DEFAULT 100,
+    width DOUBLE PRECISION NOT NULL DEFAULT 220,
+    height DOUBLE PRECISION NOT NULL DEFAULT 180,
+    z_index BIGINT NOT NULL DEFAULT 0,
     linked_chapter_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -77,7 +79,7 @@ db.exec(`
     title TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
     event_type TEXT NOT NULL DEFAULT 'plot',
-    sort_order INTEGER NOT NULL DEFAULT 0,
+    sort_order BIGINT NOT NULL DEFAULT 0,
     color TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -111,7 +113,7 @@ db.exec(`
     book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     image_id TEXT NOT NULL,
     caption TEXT NOT NULL DEFAULT '',
-    sort_order INTEGER NOT NULL DEFAULT 0,
+    sort_order BIGINT NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -121,15 +123,13 @@ db.exec(`
     book_id TEXT NOT NULL,
     filename TEXT NOT NULL,
     mime_type TEXT NOT NULL,
-    size INTEGER NOT NULL,
+    size BIGINT NOT NULL,
     created_at TEXT NOT NULL
   );
 `);
 
-export function resetTestDb() {
-  // Disable FK checks temporarily so we can delete in any order
-  db.pragma('foreign_keys = OFF');
-  db.exec(`
+function resetTestDb() {
+  mem.public.none(`
     DELETE FROM images;
     DELETE FROM chapter_illustrations;
     DELETE FROM connections;
@@ -140,10 +140,84 @@ export function resetTestDb() {
     DELETE FROM wishlist_items;
     DELETE FROM books;
   `);
-  db.pragma('foreign_keys = ON');
 }
 
-const IMAGES_DIR = path.join(TEST_DATA_DIR, 'images');
-const DATA_DIR = TEST_DATA_DIR;
+async function queryRows<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params: unknown[] = [],
+  executor: Pick<typeof pool, 'query'> | Pick<PoolClient, 'query'> = pool,
+): Promise<T[]> {
+  const result = await executor.query(text, params);
+  return result.rows as T[];
+}
 
-export { db, IMAGES_DIR, DATA_DIR };
+async function queryRow<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params: unknown[] = [],
+  executor: Pick<typeof pool, 'query'> | Pick<PoolClient, 'query'> = pool,
+): Promise<T | null> {
+  const rows = await queryRows<T>(text, params, executor);
+  return rows[0] ?? null;
+}
+
+async function queryValue<T = unknown>(
+  text: string,
+  params: unknown[] = [],
+  executor: Pick<typeof pool, 'query'> | Pick<PoolClient, 'query'> = pool,
+): Promise<T | null> {
+  const row = await queryRow<Record<string, T>>(text, params, executor);
+  if (!row) return null;
+  const firstKey = Object.keys(row)[0];
+  return firstKey ? row[firstKey] : null;
+}
+
+async function execute(
+  text: string,
+  params: unknown[] = [],
+  executor: Pick<typeof pool, 'query'> | Pick<PoolClient, 'query'> = pool,
+): Promise<void> {
+  await executor.query(text, params);
+}
+
+async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function placeholders(count: number, startAt = 1): string {
+  return Array.from({ length: count }, (_unused, index) => `$${index + startAt}`).join(', ');
+}
+
+async function initializeDatabase() {
+  // Schema is created eagerly above.
+}
+
+async function closeDatabase() {
+  await pool.end();
+}
+
+export {
+  pool,
+  pool as db,
+  DATA_DIR,
+  IMAGES_DIR,
+  closeDatabase,
+  execute,
+  initializeDatabase,
+  placeholders,
+  queryRow,
+  queryRows,
+  queryValue,
+  resetTestDb,
+  withTransaction,
+};

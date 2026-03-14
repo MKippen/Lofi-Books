@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { execute, queryRow } from '../db.js';
+import { asyncHandler } from '../http.js';
 import { camelToSnake } from '../util.js';
 
 export const timelineRouter = Router();
@@ -9,21 +10,20 @@ const ALLOWED_FIELDS = new Set([
   'eventType', 'sortOrder', 'color',
 ]);
 
-// Helper: find timeline event and verify ownership through book → user_id
-function findOwnedEvent(req: any): Record<string, unknown> | null {
+async function findOwnedEvent(req: any): Promise<Record<string, unknown> | null> {
   const userId = req.userId as string;
-  const row = db.prepare(`
-    SELECT te.* FROM timeline_events te
-    JOIN books b ON b.id = te.book_id
-    WHERE te.id = ? AND b.user_id = ?
-  `).get(req.params.id, userId) as Record<string, unknown> | undefined;
-  return row ?? null;
+  const row = await queryRow(
+    `SELECT te.* FROM timeline_events te
+     JOIN books b ON b.id = te.book_id
+     WHERE te.id = $1 AND b.user_id = $2`,
+    [req.params.id, userId],
+  ) as Record<string, unknown> | null;
+  return row;
 }
 
-// Update timeline event
-timelineRouter.put('/:id', (req, res) => {
+timelineRouter.put('/:id', asyncHandler(async (req, res) => {
   const now = new Date().toISOString();
-  const existing = findOwnedEvent(req);
+  const existing = await findOwnedEvent(req);
   if (!existing) return res.status(404).json({ error: 'Timeline event not found' });
 
   const fields: string[] = [];
@@ -31,22 +31,19 @@ timelineRouter.put('/:id', (req, res) => {
 
   for (const [key, value] of Object.entries(req.body)) {
     if (!ALLOWED_FIELDS.has(key)) continue;
-    const col = camelToSnake(key);
-    fields.push(`${col} = ?`);
     values.push(Array.isArray(value) ? JSON.stringify(value) : value);
+    fields.push(`${camelToSnake(key)} = $${values.length}`);
   }
-  fields.push('updated_at = ?');
-  values.push(now);
-  values.push(req.params.id);
+  fields.push(`updated_at = $${values.length + 1}`);
+  values.push(now, req.params.id);
 
-  db.prepare(`UPDATE timeline_events SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  await execute(`UPDATE timeline_events SET ${fields.join(', ')} WHERE id = $${values.length}`, values);
   res.json({ ok: true });
-});
+}));
 
-// Delete timeline event
-timelineRouter.delete('/:id', (req, res) => {
-  const existing = findOwnedEvent(req);
+timelineRouter.delete('/:id', asyncHandler(async (req, res) => {
+  const existing = await findOwnedEvent(req);
   if (!existing) return res.status(404).json({ error: 'Timeline event not found' });
-  db.prepare('DELETE FROM timeline_events WHERE id = ?').run(req.params.id);
+  await execute('DELETE FROM timeline_events WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
-});
+}));
