@@ -43,8 +43,15 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
         return res.status(401).json({ error: 'Invalid token' });
       }
       const claims = decoded as jwt.JwtPayload;
+      const emailClaim = (
+        claims.preferred_username
+        || claims.email
+        || claims.upn
+        || (Array.isArray((claims as any).emails) ? (claims as any).emails[0] : '')
+        || ''
+      );
       (req as any).userId = claims.oid || claims.sub || '';
-      (req as any).userEmail = claims.preferred_username || '';
+      (req as any).userEmail = emailClaim;
       next();
     },
   );
