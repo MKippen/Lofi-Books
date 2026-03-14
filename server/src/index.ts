@@ -11,6 +11,7 @@ import { wishlistRouter } from './routes/wishlist.js';
 import { imagesRouter } from './routes/images.js';
 import { backupRouter } from './routes/backup.js';
 import { aiRouter } from './routes/ai.js';
+import { telemetryRouter } from './routes/telemetry.js';
 import { requireAuth } from './middleware/auth.js';
 
 const app = express();
@@ -63,6 +64,7 @@ app.use('/api/wishlist', wishlistRouter);
 app.use('/api/images', imagesRouter);
 app.use('/api/backup', backupRouter);
 app.use('/api/ai', aiRouter);
+app.use('/api/telemetry', telemetryRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {

@@ -20,19 +20,31 @@ async function getBearerToken(): Promise<string> {
   }
 }
 
+/** Build standard auth headers for API calls (user ID + bearer token when available). */
+export async function getAuthHeaders(
+  headers: HeadersInit = {},
+): Promise<Record<string, string>> {
+  const token = await getBearerToken();
+
+  return {
+    'X-User-Id': getUserId(),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(headers as Record<string, string>),
+  };
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token = await getBearerToken();
+  const authHeaders = await getAuthHeaders({
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  });
+
   const response = await fetch(`${BASE}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': getUserId(),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
+    headers: authHeaders,
   });
 
   if (!response.ok) {
