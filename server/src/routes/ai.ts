@@ -1,5 +1,8 @@
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
 import OpenAI from 'openai';
+import { IMAGES_DIR, queryRow } from '../db.js';
 
 export const aiRouter = Router();
 
@@ -83,6 +86,115 @@ interface ChapterContext {
   wordCount: number;
 }
 
+type ReaderMood = 'studio-soft' | 'sunwash-paper' | 'moonlit-noir' | 'neon-circuit' | 'dream-haze';
+
+const READER_THEME_PROMPT = `You design immersive reading themes for a book reader.
+
+Return ONLY valid JSON in this exact shape:
+{"badge":"Neon Circuit","mood":"neon-circuit","palette":["#111827","#42d4f4","#8b5cf6"]}
+
+Rules:
+- Base the result primarily on the visual style of the cover image when present.
+- The theme is for a reading interface, so favor readable, atmospheric colors over literal poster colors.
+- "badge" must be short, 1 to 3 words.
+- "mood" must be exactly one of: "studio-soft", "sunwash-paper", "moonlit-noir", "neon-circuit", "dream-haze".
+- "palette" must contain exactly 3 distinct hex colors ordered as: dominant, accent, support.
+- If the cover feels dark, futuristic, glitchy, cyber, or high-contrast, strongly prefer "neon-circuit" or "moonlit-noir".
+- If the cover feels warm, nostalgic, paper-like, or sunlit, prefer "sunwash-paper".
+- If the cover feels airy, dreamy, pastel, or celestial, prefer "dream-haze".
+- If the cover is gentle and understated, prefer "studio-soft".`;
+
+const READER_THEME_DEFAULTS: Record<ReaderMood, { badge: string; palette: string[] }> = {
+  'studio-soft': { badge: 'Studio Soft', palette: ['#7c9a6e', '#c4836a', '#fdfbf7'] },
+  'sunwash-paper': { badge: 'Sunwash Paper', palette: ['#c58d54', '#f1d0a3', '#fff8eb'] },
+  'moonlit-noir': { badge: 'Moonlit Noir', palette: ['#17181f', '#c59a78', '#44312a'] },
+  'neon-circuit': { badge: 'Neon Circuit', palette: ['#0b1220', '#41d6ff', '#6d5efc'] },
+  'dream-haze': { badge: 'Dream Haze', palette: ['#c6d6f2', '#8aa8ff', '#f4efff'] },
+};
+
+function extFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/svg+xml': 'svg',
+  };
+  return map[mime] || 'bin';
+}
+
+function isReaderMood(value: unknown): value is ReaderMood {
+  return value === 'studio-soft'
+    || value === 'sunwash-paper'
+    || value === 'moonlit-noir'
+    || value === 'neon-circuit'
+    || value === 'dream-haze';
+}
+
+function sanitizeHex(color: unknown): string | null {
+  if (typeof color !== 'string') return null;
+  const trimmed = color.trim();
+  if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed)) return null;
+  return trimmed.toLowerCase();
+}
+
+function fallbackMoodFromText(title: string, genre = '', description = ''): ReaderMood {
+  const haystack = `${title} ${genre} ${description}`.toLowerCase();
+  if (/\b(glitch|cyber|neon|future|machine|circuit|signal|digital|shadow)\b/.test(haystack)) return 'neon-circuit';
+  if (/\b(night|midnight|ghost|black|dark|smoke|crime|noir)\b/.test(haystack)) return 'moonlit-noir';
+  if (/\b(dream|moon|mist|sky|star|cloud|echo|magic)\b/.test(haystack)) return 'dream-haze';
+  if (/\b(sun|gold|garden|summer|paper|home|heart|warm)\b/.test(haystack)) return 'sunwash-paper';
+  return 'studio-soft';
+}
+
+function sanitizeReaderTheme(raw: unknown, title: string, genre = '', description = '') {
+  const fallbackMood = fallbackMoodFromText(title, genre, description);
+  const parsed = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
+  const mood = isReaderMood(parsed.mood) ? parsed.mood : fallbackMood;
+  const defaults = READER_THEME_DEFAULTS[mood];
+  const palette = Array.isArray(parsed.palette)
+    ? parsed.palette
+      .map(sanitizeHex)
+      .filter((color): color is string => Boolean(color))
+      .filter((color, index, arr) => arr.indexOf(color) === index)
+      .slice(0, 3)
+    : [];
+  const badge = typeof parsed.badge === 'string' && parsed.badge.trim()
+    ? parsed.badge.trim().slice(0, 32)
+    : defaults.badge;
+
+  while (palette.length < 3) {
+    const fallbackColor = defaults.palette[palette.length];
+    if (!palette.includes(fallbackColor)) palette.push(fallbackColor);
+    else break;
+  }
+
+  return {
+    badge,
+    mood,
+    palette: palette.slice(0, 3),
+  };
+}
+
+async function loadCoverDataUrl(bookId: string, coverImageId: string, userId: string): Promise<string | null> {
+  const row = await queryRow(
+    `SELECT i.mime_type, i.size
+     FROM images i
+     JOIN books b ON b.id = i.book_id
+     WHERE i.id = $1 AND b.id = $2 AND b.user_id = $3`,
+    [coverImageId, bookId, userId],
+  ) as { mime_type?: string; size?: number } | null;
+
+  if (!row?.mime_type) return null;
+  if (typeof row.size === 'number' && row.size > 4_500_000) return null;
+
+  const filePath = path.join(IMAGES_DIR, `${coverImageId}.${extFromMime(row.mime_type)}`);
+  if (!fs.existsSync(filePath)) return null;
+
+  const base64 = fs.readFileSync(filePath).toString('base64');
+  return `data:${row.mime_type};base64,${base64}`;
+}
+
 // POST /api/ai/chat — streaming chat endpoint
 aiRouter.post('/chat', async (req, res) => {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -160,6 +272,102 @@ aiRouter.post('/chat', async (req, res) => {
       res.write(`data: ${JSON.stringify({ error: 'Stream interrupted' })}\n\n`);
       res.end();
     }
+  }
+});
+
+aiRouter.post('/reader-theme', async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: 'OpenAI API key not configured' });
+    return;
+  }
+
+  const userId = (req as any).userId as string | undefined;
+  const {
+    bookId,
+    coverImageId,
+    description = '',
+    genre = '',
+    title,
+  } = req.body as {
+    bookId?: string;
+    coverImageId?: string | null;
+    description?: string;
+    genre?: string;
+    title?: string;
+  };
+
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  if (!bookId || !title) {
+    res.status(400).json({ error: 'bookId and title are required' });
+    return;
+  }
+
+  const ownedBook = await queryRow(
+    'SELECT id FROM books WHERE id = $1 AND user_id = $2',
+    [bookId, userId],
+  );
+
+  if (!ownedBook) {
+    res.status(404).json({ error: 'Book not found' });
+    return;
+  }
+
+  const openai = new OpenAI({ apiKey });
+
+  try {
+    const coverDataUrl = coverImageId
+      ? await loadCoverDataUrl(bookId, coverImageId, userId)
+      : null;
+
+    const content: OpenAI.ChatCompletionContentPart[] = [
+      {
+        type: 'text',
+        text: `Book title: ${title}
+Genre: ${genre || 'Unknown'}
+Description: ${description || 'No description provided'}
+
+Design a reader theme that feels like stepping inside this book while staying highly readable for long-form text.`,
+      },
+    ];
+
+    if (coverDataUrl) {
+      content.push({
+        type: 'image_url',
+        image_url: {
+          url: coverDataUrl,
+          detail: 'low',
+        },
+      });
+    }
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: READER_THEME_PROMPT },
+        { role: 'user', content },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 250,
+      temperature: 0.4,
+    });
+
+    const raw = completion.choices[0]?.message?.content || '{}';
+    let parsed: unknown = {};
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = {};
+    }
+
+    res.json(sanitizeReaderTheme(parsed, title, genre, description));
+  } catch (err: unknown) {
+    console.error('OpenAI reader theme error:', err);
+    res.status(500).json({ error: 'Failed to generate reader theme' });
   }
 });
 

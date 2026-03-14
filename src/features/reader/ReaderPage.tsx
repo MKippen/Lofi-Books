@@ -1,16 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { ArrowLeft, Users, Wrench, ZoomIn, ZoomOut, Type } from 'lucide-react';
+import { ArrowLeft, Users, Wrench, ZoomIn, ZoomOut, Type, Volume2, Play, Pause, Square } from 'lucide-react';
 import { useWritingTools } from '@/components/layout/WritingToolsContext';
 import { getBook } from '@/api/books';
 import { listChapters } from '@/api/chapters';
 import { listCharacters } from '@/api/characters';
+import { logClientTelemetry } from '@/api/telemetry';
+import { useImage } from '@/hooks/useImageStore';
 import type { Book, Chapter, Character } from '@/types';
 import BookPage from './BookPage';
 import ReaderControls from './ReaderControls';
+import { useReaderTheme } from './readerTheme';
 
 const FONT_SIZE_KEY = 'reader-font-size';
 const FONT_FAMILY_KEY = 'reader-font-family';
+const TTS_RATE_KEY = 'reader-tts-rate';
+const TTS_VOICE_KEY = 'reader-tts-voice-uri';
 
 const FONT_FAMILIES = [
   { label: 'Serif', value: 'serif', css: "'Lora', serif" },
@@ -22,6 +27,59 @@ const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 28;
 const FONT_SIZE_STEP = 2;
 const COLUMN_GAP = 48;
+const MIN_TTS_RATE = 0.6;
+const MAX_TTS_RATE = 1.8;
+
+function scoreVoiceNaturalness(voice: SpeechSynthesisVoice): number {
+  const name = voice.name.toLowerCase();
+  const lang = voice.lang.toLowerCase();
+  let score = 0;
+
+  if (lang.startsWith('en-us')) score += 35;
+  else if (lang.startsWith('en-')) score += 20;
+  else score -= 30;
+
+  if (voice.default) score += 12;
+  if (!voice.localService) score += 8;
+
+  if (/natural|neural|online|enhanced|premium/.test(name)) score += 80;
+  if (/aria|jenny|guy|samantha|zira|ava|andrew|google/.test(name)) score += 30;
+  if (/compact|espeak|festival|basic/.test(name)) score -= 50;
+
+  return score;
+}
+
+function getTokenIndexAtChar(text: string, charIndex: number): number {
+  if (!text) return 0;
+  const safeIndex = Math.max(0, Math.min(charIndex, Math.max(0, text.length - 1)));
+
+  const tokenRegex = /\S+/g;
+  let tokenIdx = 0;
+  let match = tokenRegex.exec(text);
+  while (match) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (safeIndex <= end) return tokenIdx;
+    tokenIdx += 1;
+    match = tokenRegex.exec(text);
+  }
+
+  return Math.max(0, tokenIdx - 1);
+}
+
+function getCharIndexAtToken(text: string, tokenIndex: number): number {
+  if (!text) return 0;
+  const safeToken = Math.max(0, tokenIndex);
+  const tokenRegex = /\S+/g;
+  let idx = 0;
+  let match = tokenRegex.exec(text);
+  while (match) {
+    if (idx === safeToken) return match.index;
+    idx += 1;
+    match = tokenRegex.exec(text);
+  }
+  return 0;
+}
 
 /** Hook to track whether we have enough width for a two-page spread. */
 function useTwoPageMode(breakpoint = 1024): boolean {
@@ -51,6 +109,55 @@ export default function ReaderPage() {
   const [totalSpreads, setTotalSpreads] = useState(1);
   const [showCharacterPortraits, setShowCharacterPortraits] = useState(false);
   const [showFontPicker, setShowFontPicker] = useState(false);
+  const [showReadAloudPanel, setShowReadAloudPanel] = useState(false);
+
+  const speechSupported = typeof window !== 'undefined'
+    && 'speechSynthesis' in window
+    && 'SpeechSynthesisUtterance' in window;
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [ttsRate, setTtsRate] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(TTS_RATE_KEY) ?? '1');
+      return Number.isFinite(saved) ? Math.min(MAX_TTS_RATE, Math.max(MIN_TTS_RATE, saved)) : 1;
+    } catch {
+      return 1;
+    }
+  });
+  const [ttsVoiceURI, setTtsVoiceURI] = useState(() => {
+    try { return localStorage.getItem(TTS_VOICE_KEY) || ''; } catch { return ''; }
+  });
+  const [chapterPagesText, setChapterPagesText] = useState<string[]>([]);
+  const [isReading, setIsReading] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [activeReadPageIndex, setActiveReadPageIndex] = useState<number | null>(null);
+  const [activeReadCharIndex, setActiveReadCharIndex] = useState<number | null>(null);
+  const [activeReadTokenIndex, setActiveReadTokenIndex] = useState<number | null>(null);
+  const [readAloudStatus, setReadAloudStatus] = useState<string | null>(null);
+  const [anchorPreviewPage, setAnchorPreviewPage] = useState<number | null>(null);
+  const [anchorPreviewToken, setAnchorPreviewToken] = useState<number | null>(null);
+  const readAnchorRef = useRef<{ page: number | null; token: number | null }>({ page: null, token: null });
+  const readAloudPanelRef = useRef<HTMLDivElement>(null);
+  const stopRequestedRef = useRef(false);
+  const pendingReadStartRef = useRef<{ page: number; token: number } | null>(null);
+  const readSessionRef = useRef(0);
+  const prevLayoutRef = useRef({
+    chapter: 0,
+    fontSize: 18,
+    fontFamily: 'serif',
+    twoPage: false,
+  });
+  const prevVoiceRateRef = useRef({
+    voice: '',
+    rate: 1,
+  });
+  const readAloudBuildId = useMemo(() => {
+    if (typeof document === 'undefined') return null;
+    const scriptWithHash = Array.from(document.scripts).find((script) => (
+      typeof script.src === 'string' && /\/assets\/index-[^/]+\.js/.test(script.src)
+    ));
+    const match = scriptWithHash?.src.match(/index-([^.]+)\.js/);
+    return match?.[1] ?? null;
+  }, []);
 
   // Reader customization — persisted to localStorage
   const [fontSize, setFontSize] = useState(() => {
@@ -61,6 +168,28 @@ export default function ReaderPage() {
   });
 
   const fontConfig = FONT_FAMILIES.find((f) => f.value === fontFamily) ?? FONT_FAMILIES[0];
+  const { url: coverUrl } = useImage(book?.coverImageId);
+  const readerTheme = useReaderTheme({
+    bookId: book?.id,
+    coverImageId: book?.coverImageId,
+    coverUrl,
+    description: book?.description,
+    genre: book?.genre,
+    title: book?.title ?? '',
+  });
+
+  useEffect(() => {
+    prevLayoutRef.current = {
+      chapter: currentChapterIndex,
+      fontSize,
+      fontFamily,
+      twoPage,
+    };
+    prevVoiceRateRef.current = {
+      voice: ttsVoiceURI,
+      rate: ttsRate,
+    };
+  }, []); // initialize change trackers once
 
   useEffect(() => {
     try { localStorage.setItem(FONT_SIZE_KEY, String(fontSize)); } catch { /* ignore */ }
@@ -68,6 +197,52 @@ export default function ReaderPage() {
   useEffect(() => {
     try { localStorage.setItem(FONT_FAMILY_KEY, fontFamily); } catch { /* ignore */ }
   }, [fontFamily]);
+  useEffect(() => {
+    try { localStorage.setItem(TTS_RATE_KEY, String(ttsRate)); } catch { /* ignore */ }
+  }, [ttsRate]);
+  useEffect(() => {
+    try { localStorage.setItem(TTS_VOICE_KEY, ttsVoiceURI); } catch { /* ignore */ }
+  }, [ttsVoiceURI]);
+
+  useEffect(() => {
+    if (!speechSupported) return;
+
+    const synth = window.speechSynthesis;
+    const refreshVoices = () => {
+      const nextVoices = synth.getVoices();
+      nextVoices.sort((a, b) => a.name.localeCompare(b.name));
+      setVoices(nextVoices);
+    };
+
+    refreshVoices();
+    synth.addEventListener('voiceschanged', refreshVoices);
+    return () => synth.removeEventListener('voiceschanged', refreshVoices);
+  }, [speechSupported]);
+
+  const voiceOptions = useMemo(() => {
+    if (voices.length === 0) return [];
+    const englishPool = voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
+    const pool = englishPool.length > 0 ? englishPool : voices;
+
+    const deduped = pool.filter((voice, index, arr) => (
+      arr.findIndex((v) => v.voiceURI === voice.voiceURI) === index
+    ));
+
+    deduped.sort((a, b) => (
+      scoreVoiceNaturalness(b) - scoreVoiceNaturalness(a)
+      || a.name.localeCompare(b.name)
+    ));
+
+    return deduped.slice(0, 3);
+  }, [voices]);
+
+  useEffect(() => {
+    if (voiceOptions.length === 0) return;
+    const hasSelected = voiceOptions.some((v) => v.voiceURI === ttsVoiceURI);
+    if (hasSelected) return;
+    const preferred = voiceOptions.find((v) => v.default) ?? voiceOptions[0];
+    setTtsVoiceURI(preferred.voiceURI);
+  }, [voiceOptions, ttsVoiceURI]);
 
   const zoomIn = useCallback(() => setFontSize((s) => Math.min(s + FONT_SIZE_STEP, MAX_FONT_SIZE)), []);
   const zoomOut = useCallback(() => setFontSize((s) => Math.max(s - FONT_SIZE_STEP, MIN_FONT_SIZE)), []);
@@ -100,15 +275,415 @@ export default function ReaderPage() {
   useEffect(() => {
     setSpreadIndex(0);
     setTotalSpreads(1);
+    readAnchorRef.current = { page: null, token: null };
+    setAnchorPreviewPage(null);
+    setAnchorPreviewToken(null);
   }, [currentChapterIndex]);
 
   // Reset spread when font/layout changes
   useEffect(() => {
     setSpreadIndex(0);
+    readAnchorRef.current = { page: null, token: null };
+    setAnchorPreviewPage(null);
+    setAnchorPreviewToken(null);
   }, [fontSize, fontFamily, twoPage]);
 
   const currentChapter = chapters[currentChapterIndex] ?? null;
   const columnCount = twoPage ? 2 : 1;
+  const currentReadPage = activeReadPageIndex != null ? activeReadPageIndex + 1 : null;
+  const readAloudMode = isReading || isPaused;
+  const readAloudInteractionMode = showReadAloudPanel || readAloudMode;
+  const clearReadAnchor = useCallback(() => {
+    readAnchorRef.current = { page: null, token: null };
+    setAnchorPreviewPage(null);
+    setAnchorPreviewToken(null);
+  }, []);
+
+  const stopReading = useCallback((reason = 'internal') => {
+    if (!speechSupported) return;
+    if (isReading || isPaused) {
+      logClientTelemetry('read_stop', {
+        reason,
+        chapterIndex: currentChapterIndex,
+        spreadIndex,
+        activePageIndex: activeReadPageIndex,
+      });
+    }
+    stopRequestedRef.current = true;
+    readSessionRef.current += 1;
+    window.speechSynthesis.cancel();
+    setIsReading(false);
+    setIsPaused(false);
+    setActiveReadPageIndex(null);
+    setActiveReadCharIndex(null);
+    setActiveReadTokenIndex(null);
+    pendingReadStartRef.current = null;
+    setReadAloudStatus(null);
+  }, [activeReadPageIndex, currentChapterIndex, isPaused, isReading, speechSupported, spreadIndex]);
+
+  const speakFromPage = useCallback((startPageIndex: number, startTokenIndex = 0) => {
+    logClientTelemetry('read_start_request', {
+      chapterIndex: currentChapterIndex,
+      spreadIndex,
+      startPageIndex,
+      startTokenIndex,
+      pageTextCount: chapterPagesText.length,
+    });
+    if (!speechSupported || chapterPagesText.length === 0) {
+      setIsReading(false);
+      setIsPaused(false);
+      setActiveReadPageIndex(null);
+      setActiveReadCharIndex(null);
+      setActiveReadTokenIndex(null);
+      setReadAloudStatus(
+        speechSupported
+          ? 'Pages are still loading. Try again in a second.'
+          : 'Read aloud is not supported in this browser.',
+      );
+      logClientTelemetry('read_start_blocked', {
+        speechSupported,
+        pageTextCount: chapterPagesText.length,
+      }, { severity: 'warn' });
+      return;
+    }
+
+    const synth = window.speechSynthesis;
+    readSessionRef.current += 1;
+    const runId = readSessionRef.current;
+    const maxPages = chapterPagesText.length;
+    setReadAloudStatus(null);
+    const selectedVoice = voiceOptions.find((v) => v.voiceURI === ttsVoiceURI)
+      ?? voiceOptions.find((v) => v.default)
+      ?? voiceOptions[0]
+      ?? null;
+    const voiceFallbackChain = [
+      selectedVoice,
+      ...voiceOptions.filter((v) => !selectedVoice || v.voiceURI !== selectedVoice.voiceURI),
+      ...voices.filter((v) => !selectedVoice || v.voiceURI !== selectedVoice.voiceURI),
+      null, // final fallback: let browser pick default voice
+    ].filter((voice, index, arr) => (
+      voice === null
+        ? arr.findIndex((v) => v === null) === index
+        : arr.findIndex((v) => v && v.voiceURI === voice.voiceURI) === index
+    ));
+
+    const speakPage = (
+      pageIndex: number,
+      startTokenForPage = 0,
+      retryCount = 0,
+      voiceAttempt = 0,
+    ) => {
+      if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+
+      if (pageIndex >= maxPages) {
+        if (runId !== readSessionRef.current) return;
+        logClientTelemetry('read_finished', {
+          chapterIndex: currentChapterIndex,
+          startPageIndex,
+          startTokenIndex,
+        });
+        setIsReading(false);
+        setIsPaused(false);
+        setActiveReadPageIndex(null);
+        setActiveReadCharIndex(null);
+        setActiveReadTokenIndex(null);
+        setReadAloudStatus(null);
+        return;
+      }
+
+      const text = chapterPagesText[pageIndex]?.trim() ?? '';
+      if (!text) {
+        speakPage(pageIndex + 1, 0);
+        return;
+      }
+
+      const startChar = getCharIndexAtToken(text, startTokenForPage);
+      const spokenText = startChar > 0 ? text.slice(startChar).trimStart() : text;
+      const spokenTokenOffset = startTokenForPage;
+      const spokenStartChar = startChar;
+
+      const targetSpread = Math.floor(pageIndex / columnCount);
+      setSpreadIndex((prev) => (prev === targetSpread ? prev : targetSpread));
+      setActiveReadPageIndex(pageIndex);
+      setActiveReadCharIndex(spokenStartChar);
+      setActiveReadTokenIndex(spokenTokenOffset);
+      setIsReading(true);
+      setIsPaused(false);
+
+      const utterance = new SpeechSynthesisUtterance(spokenText);
+      utterance.rate = ttsRate;
+      const attemptVoice = voiceFallbackChain[Math.max(0, Math.min(voiceAttempt, voiceFallbackChain.length - 1))];
+      if (attemptVoice) utterance.voice = attemptVoice;
+
+      let started = false;
+      let watchdogId: number | null = null;
+
+      const clearWatchdog = () => {
+        if (watchdogId != null) {
+          window.clearTimeout(watchdogId);
+          watchdogId = null;
+        }
+      };
+
+      const failStart = (statusMessage = 'Could not start read aloud. Click Read From Here again.') => {
+        logClientTelemetry('read_start_failed', {
+          chapterIndex: currentChapterIndex,
+          pageIndex,
+          startTokenForPage,
+        }, { severity: 'error' });
+        setIsReading(false);
+        setIsPaused(false);
+        setActiveReadPageIndex(null);
+        setActiveReadCharIndex(null);
+        setActiveReadTokenIndex(null);
+        setReadAloudStatus(statusMessage);
+      };
+
+      const tryNextVoice = (reason: string): boolean => {
+        const nextVoiceAttempt = voiceAttempt + 1;
+        if (nextVoiceAttempt >= voiceFallbackChain.length) return false;
+        const nextVoice = voiceFallbackChain[nextVoiceAttempt];
+        logClientTelemetry('read_voice_fallback', {
+          chapterIndex: currentChapterIndex,
+          pageIndex,
+          startTokenForPage,
+          retryCount,
+          reason,
+          fromVoiceUri: attemptVoice?.voiceURI ?? 'default',
+          toVoiceUri: nextVoice?.voiceURI ?? 'default',
+        }, { severity: 'warn' });
+        window.setTimeout(() => {
+          if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+          speakPage(pageIndex, startTokenForPage, retryCount, nextVoiceAttempt);
+        }, 80);
+        return true;
+      };
+
+      utterance.onstart = () => {
+        if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+        started = true;
+        clearWatchdog();
+        logClientTelemetry('read_utterance_start', {
+          chapterIndex: currentChapterIndex,
+          pageIndex,
+          startTokenForPage,
+          voiceUri: attemptVoice?.voiceURI ?? ttsVoiceURI,
+          voiceName: attemptVoice?.name ?? 'default',
+          rate: ttsRate,
+        });
+      };
+
+      utterance.onboundary = (event) => {
+        if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+        if (typeof event.charIndex === 'number') {
+          const localChar = Math.max(0, event.charIndex);
+          setActiveReadCharIndex(spokenStartChar + localChar);
+          setActiveReadTokenIndex(spokenTokenOffset + getTokenIndexAtChar(spokenText, localChar));
+        }
+      };
+
+      utterance.onend = () => {
+        if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+        clearWatchdog();
+        if (!started) {
+          logClientTelemetry('read_utterance_end_without_start', {
+            chapterIndex: currentChapterIndex,
+            pageIndex,
+            retryCount,
+            voiceUri: attemptVoice?.voiceURI ?? ttsVoiceURI,
+            rate: ttsRate,
+            synthSpeaking: synth.speaking,
+            synthPending: synth.pending,
+            synthPaused: synth.paused,
+          }, { severity: 'warn' });
+          if (tryNextVoice('utterance_onend_without_start')) return;
+          if (retryCount < 2) {
+            logClientTelemetry('read_retry_scheduled', {
+              chapterIndex: currentChapterIndex,
+              pageIndex,
+              retryCount: retryCount + 1,
+              reason: 'utterance_onend_without_start',
+            }, { severity: 'warn' });
+            window.setTimeout(() => {
+              if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+              speakPage(pageIndex, startTokenForPage, retryCount + 1, voiceAttempt);
+            }, 120);
+            return;
+          }
+          failStart();
+          return;
+        }
+        logClientTelemetry('read_page_end', {
+          chapterIndex: currentChapterIndex,
+          pageIndex,
+        });
+        speakPage(pageIndex + 1, 0);
+      };
+
+      utterance.onerror = (event) => {
+        if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+        clearWatchdog();
+        logClientTelemetry('read_utterance_error', {
+          chapterIndex: currentChapterIndex,
+          pageIndex,
+          retryCount,
+          voiceUri: attemptVoice?.voiceURI ?? ttsVoiceURI,
+          error: event.error,
+          synthSpeaking: synth.speaking,
+          synthPending: synth.pending,
+          synthPaused: synth.paused,
+        }, { severity: 'warn' });
+        if (event.error === 'not-allowed') {
+          failStart('Browser blocked read aloud audio. Click the page, then click Read From Here.');
+          return;
+        }
+        if (tryNextVoice('utterance_onerror')) return;
+        if (retryCount < 2) {
+          logClientTelemetry('read_retry_scheduled', {
+            chapterIndex: currentChapterIndex,
+            pageIndex,
+            retryCount: retryCount + 1,
+            reason: 'utterance_onerror',
+          }, { severity: 'warn' });
+          window.setTimeout(() => {
+            if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+            speakPage(pageIndex, startTokenForPage, retryCount + 1, voiceAttempt);
+          }, 120);
+          return;
+        }
+        failStart();
+      };
+
+      synth.speak(utterance);
+
+      watchdogId = window.setTimeout(() => {
+        if (stopRequestedRef.current || runId !== readSessionRef.current || started) return;
+        if (synth.speaking || synth.pending) return;
+        if (tryNextVoice('watchdog_timeout_no_start')) return;
+        if (retryCount < 2) {
+          logClientTelemetry('read_retry_scheduled', {
+            chapterIndex: currentChapterIndex,
+            pageIndex,
+            retryCount: retryCount + 1,
+            reason: 'watchdog_timeout',
+          }, { severity: 'warn' });
+          synth.cancel();
+          window.setTimeout(() => {
+            if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+            speakPage(pageIndex, startTokenForPage, retryCount + 1, voiceAttempt);
+          }, 90);
+          return;
+        }
+        failStart();
+      }, 450);
+    };
+
+    if (synth.paused) synth.resume();
+    stopRequestedRef.current = false;
+    const startReading = () => {
+      if (stopRequestedRef.current || runId !== readSessionRef.current) return;
+      speakPage(startPageIndex, startTokenIndex);
+    };
+    if (synth.speaking || synth.pending) {
+      synth.cancel();
+      window.setTimeout(startReading, 90);
+      return;
+    }
+    startReading();
+  }, [chapterPagesText, columnCount, currentChapterIndex, speechSupported, spreadIndex, ttsRate, ttsVoiceURI, voiceOptions, voices]);
+
+  const toggleReadAloud = useCallback(() => {
+    if (!speechSupported) return;
+
+    const synth = window.speechSynthesis;
+    if (isReading) {
+      if (isPaused) {
+        synth.resume();
+        setIsPaused(false);
+        logClientTelemetry('read_resume', { chapterIndex: currentChapterIndex, spreadIndex });
+      } else {
+        synth.pause();
+        setIsPaused(true);
+        logClientTelemetry('read_pause', { chapterIndex: currentChapterIndex, spreadIndex });
+      }
+      return;
+    }
+
+    setReadAloudStatus(null);
+    const spreadStart = Math.max(0, spreadIndex * columnCount);
+    const hintPage = readAnchorRef.current.page;
+    const maxPages = chapterPagesText.length;
+    const useAnchor = hintPage != null && (maxPages === 0 || hintPage < maxPages);
+    const unresolvedStartPage = useAnchor ? hintPage : spreadStart;
+    const startPage = maxPages > 0
+      ? Math.max(0, Math.min(unresolvedStartPage, maxPages - 1))
+      : Math.max(0, unresolvedStartPage);
+    const startToken = useAnchor
+      ? Math.max(0, readAnchorRef.current.token ?? 0)
+      : 0;
+    if (!useAnchor && hintPage != null) {
+      readAnchorRef.current = { page: startPage, token: 0 };
+      setAnchorPreviewPage(startPage);
+      setAnchorPreviewToken(0);
+    }
+    if (maxPages <= 0) {
+      pendingReadStartRef.current = { page: startPage, token: startToken };
+      setReadAloudStatus('Preparing pages...');
+      logClientTelemetry('read_pending_pages', {
+        chapterIndex: currentChapterIndex,
+        spreadIndex,
+        startPage,
+        startToken,
+      }, { severity: 'warn' });
+      return;
+    }
+    speakFromPage(startPage, startToken);
+  }, [
+    chapterPagesText.length,
+    columnCount,
+    currentChapterIndex,
+    isPaused,
+    isReading,
+    speakFromPage,
+    speechSupported,
+    spreadIndex,
+  ]);
+
+  useEffect(() => {
+    const pending = pendingReadStartRef.current;
+    if (!pending) return;
+    if (chapterPagesText.length === 0) return;
+
+    pendingReadStartRef.current = null;
+    logClientTelemetry('read_pending_start_flush', {
+      chapterIndex: currentChapterIndex,
+      spreadIndex,
+      pageIndex: pending.page,
+      tokenIndex: pending.token,
+      pageTextCount: chapterPagesText.length,
+    });
+    speakFromPage(
+      Math.max(0, Math.min(pending.page, chapterPagesText.length - 1)),
+      Math.max(0, pending.token),
+    );
+  }, [chapterPagesText, currentChapterIndex, speakFromPage, spreadIndex]);
+
+  useEffect(() => {
+    const prev = prevLayoutRef.current;
+    const layoutChanged = prev.chapter !== currentChapterIndex
+      || prev.fontSize !== fontSize
+      || prev.fontFamily !== fontFamily
+      || prev.twoPage !== twoPage;
+
+    prevLayoutRef.current = {
+      chapter: currentChapterIndex,
+      fontSize,
+      fontFamily,
+      twoPage,
+    };
+
+    if (isReading && layoutChanged) stopReading('layout_change');
+  }, [currentChapterIndex, fontFamily, fontSize, isReading, stopReading, twoPage]);
 
   // Can we navigate backward?
   const canGoPrev = spreadIndex > 0 || currentChapterIndex > 0;
@@ -116,14 +691,18 @@ export default function ReaderPage() {
   const canGoNext = spreadIndex < totalSpreads - 1 || currentChapterIndex < chapters.length - 1;
 
   const goNext = useCallback(() => {
+    if (isReading) stopReading('navigate_next');
+    clearReadAnchor();
     if (spreadIndex < totalSpreads - 1) {
       setSpreadIndex((s) => s + 1);
     } else if (currentChapterIndex < chapters.length - 1) {
       setCurrentChapterIndex((i) => i + 1);
     }
-  }, [spreadIndex, totalSpreads, currentChapterIndex, chapters.length]);
+  }, [chapters.length, clearReadAnchor, currentChapterIndex, isReading, spreadIndex, stopReading, totalSpreads]);
 
   const goPrev = useCallback(() => {
+    if (isReading) stopReading('navigate_prev');
+    clearReadAnchor();
     if (spreadIndex > 0) {
       setSpreadIndex((s) => s - 1);
     } else if (currentChapterIndex > 0) {
@@ -131,7 +710,7 @@ export default function ReaderPage() {
       setCurrentChapterIndex((i) => i - 1);
       setSpreadIndex(999);
     }
-  }, [spreadIndex, currentChapterIndex]);
+  }, [clearReadAnchor, currentChapterIndex, isReading, spreadIndex, stopReading]);
 
   const handleTotalSpreadsChange = useCallback((total: number) => {
     setTotalSpreads(total);
@@ -187,9 +766,84 @@ export default function ReaderPage() {
     return () => { clearTimeout(timer); document.removeEventListener('click', handleClick); };
   }, [showFontPicker]);
 
+  useEffect(() => {
+    const prev = prevVoiceRateRef.current;
+    const voiceOrRateChanged = prev.voice !== ttsVoiceURI || prev.rate !== ttsRate;
+    prevVoiceRateRef.current = { voice: ttsVoiceURI, rate: ttsRate };
+    if (isReading && voiceOrRateChanged) stopReading();
+  }, [isReading, stopReading, ttsRate, ttsVoiceURI]);
+
+  useEffect(() => () => {
+    if (!speechSupported) return;
+    window.speechSynthesis.cancel();
+  }, [speechSupported]);
+
   const handleChapterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    if (isReading) stopReading('chapter_change');
+    clearReadAnchor();
     setCurrentChapterIndex(Number(e.target.value));
   };
+
+  const handleReadAnchorChange = useCallback((pageIndex: number, tokenIndex: number | null) => {
+    if (tokenIndex == null) return;
+    logClientTelemetry('read_anchor_set', {
+      chapterIndex: currentChapterIndex,
+      spreadIndex,
+      pageIndex,
+      tokenIndex,
+    });
+    readAnchorRef.current = { page: pageIndex, token: tokenIndex };
+    setAnchorPreviewPage(pageIndex);
+    setAnchorPreviewToken(tokenIndex);
+  }, [currentChapterIndex, spreadIndex]);
+
+  const handleReadAnchorActivate = useCallback((pageIndex: number, tokenIndex: number | null) => {
+    if (!readAloudInteractionMode || !speechSupported) return;
+    const safePage = Math.max(0, pageIndex);
+    const safeToken = Math.max(0, tokenIndex ?? 0);
+    logClientTelemetry('read_anchor_activate', {
+      chapterIndex: currentChapterIndex,
+      spreadIndex,
+      pageIndex: safePage,
+      tokenIndex: safeToken,
+    });
+    readAnchorRef.current = { page: safePage, token: safeToken };
+    setAnchorPreviewPage(safePage);
+    setAnchorPreviewToken(safeToken);
+    speakFromPage(safePage, safeToken);
+  }, [currentChapterIndex, readAloudInteractionMode, speakFromPage, speechSupported, spreadIndex]);
+
+  const handleReadAloudPanelToggle = useCallback(() => {
+    setShowReadAloudPanel((prev) => {
+      const next = !prev;
+      if (next) {
+        const spreadStart = Math.max(0, spreadIndex * columnCount);
+        const spreadEnd = spreadStart + columnCount - 1;
+        const anchorPage = readAnchorRef.current.page;
+        const anchorInSpread = anchorPage != null && anchorPage >= spreadStart && anchorPage <= spreadEnd;
+        if (!anchorInSpread) {
+          readAnchorRef.current = { page: spreadStart, token: 0 };
+          setAnchorPreviewPage(spreadStart);
+          setAnchorPreviewToken(0);
+          logClientTelemetry('read_anchor_defaulted', {
+            chapterIndex: currentChapterIndex,
+            spreadIndex,
+            pageIndex: spreadStart,
+          });
+        }
+      }
+      logClientTelemetry('read_panel_toggle', {
+        chapterIndex: currentChapterIndex,
+        spreadIndex,
+        open: next,
+      });
+      return next;
+    });
+  }, [columnCount, currentChapterIndex, spreadIndex]);
+
+  const handleReadStopClick = useCallback(() => {
+    stopReading('manual_stop');
+  }, [stopReading]);
 
   if (loading) {
     return (
@@ -239,29 +893,56 @@ export default function ReaderPage() {
     : `${pageStart}`;
 
   return (
-    <div className="h-screen bg-cream flex flex-col overflow-hidden">
+    <div
+      className="reader-shell h-screen flex flex-col overflow-hidden"
+      data-reader-mood={readerTheme.mood}
+      style={readerTheme.style as CSSProperties}
+    >
       {/* Top Bar */}
-      <div className="shrink-0 z-50 bg-surface/90 backdrop-blur-sm border-b border-primary/10">
+      <div className="reader-topbar shrink-0 z-50">
         <div className="flex items-center justify-between px-6 py-2">
           {/* Left: Back button */}
           <button
             type="button"
             onClick={() => navigate(`/book/${bookId}`)}
-            className="inline-flex items-center gap-2 text-indigo/60 hover:text-primary font-semibold transition-colors text-sm cursor-pointer"
+            className="reader-back-button inline-flex items-center gap-2 font-semibold transition-colors text-sm cursor-pointer"
           >
             <ArrowLeft size={18} />
             Back
           </button>
 
           {/* Center: Book title + chapter select */}
-          <div className="flex items-center gap-4">
-            <h1 className="font-heading text-lg text-indigo hidden sm:block">
-              {book.title}
-            </h1>
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="hidden sm:flex items-center gap-3 min-w-0">
+              {coverUrl && (
+                <img
+                  src={coverUrl}
+                  alt={book.title}
+                  className="reader-theme-cover h-11 w-9 shrink-0 object-cover"
+                />
+              )}
+              <div className="min-w-0">
+                <h1 className="reader-book-title text-lg truncate">
+                  {book.title}
+                </h1>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="reader-theme-badge">{readerTheme.badge}</span>
+                  <div className="flex items-center gap-1">
+                    {readerTheme.palette.slice(0, 3).map((color) => (
+                      <span
+                        key={color}
+                        className="reader-palette-dot"
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
             <select
               value={currentChapterIndex}
               onChange={handleChapterChange}
-              className="bg-surface border border-primary/20 rounded-lg px-3 py-1.5 text-sm text-indigo font-body focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer"
+              className="reader-select rounded-lg px-3 py-1.5 text-sm font-body focus:outline-none cursor-pointer"
             >
               {chapters.map((ch, idx) => (
                 <option key={ch.id} value={idx}>
@@ -278,21 +959,21 @@ export default function ReaderPage() {
               type="button"
               onClick={zoomOut}
               disabled={fontSize <= MIN_FONT_SIZE}
-              className="p-1.5 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              className="reader-control-button p-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="Decrease font size"
             >
               <ZoomOut size={16} />
             </button>
 
             {/* Font size indicator */}
-            <span className="text-xs text-indigo/40 w-6 text-center tabular-nums">{fontSize}</span>
+            <span className="reader-page-status text-xs w-6 text-center tabular-nums">{fontSize}</span>
 
             {/* Zoom in */}
             <button
               type="button"
               onClick={zoomIn}
               disabled={fontSize >= MAX_FONT_SIZE}
-              className="p-1.5 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              className="reader-control-button p-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="Increase font size"
             >
               <ZoomIn size={16} />
@@ -303,13 +984,13 @@ export default function ReaderPage() {
               <button
                 type="button"
                 onClick={() => setShowFontPicker((v) => !v)}
-                className="p-1.5 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer"
+                className="reader-control-button p-1.5 rounded-lg transition-all cursor-pointer"
                 title="Change font"
               >
                 <Type size={16} />
               </button>
               {showFontPicker && (
-                <div className="absolute right-0 top-full mt-1 bg-surface border border-primary/15 rounded-xl shadow-xl py-1 z-50 min-w-[120px]">
+                <div className="reader-floating-panel absolute right-0 top-full mt-1 rounded-xl py-1 z-50 min-w-[120px]">
                   {FONT_FAMILIES.map((f) => (
                     <button
                       key={f.value}
@@ -317,8 +998,8 @@ export default function ReaderPage() {
                       onClick={() => { setFontFamily(f.value); setShowFontPicker(false); }}
                       className={`w-full text-left px-3 py-1.5 text-sm transition-colors cursor-pointer ${
                         fontFamily === f.value
-                          ? 'text-primary bg-primary/5 font-semibold'
-                          : 'text-indigo/60 hover:bg-primary/5'
+                          ? 'reader-option-active font-semibold'
+                          : 'reader-option'
                       }`}
                       style={{ fontFamily: f.css }}
                     >
@@ -329,19 +1010,123 @@ export default function ReaderPage() {
               )}
             </div>
 
+            {/* Read aloud */}
+            <div className="relative" ref={readAloudPanelRef}>
+              <button
+                type="button"
+                onClick={handleReadAloudPanelToggle}
+                className={`reader-control-button p-1.5 rounded-lg transition-all cursor-pointer ${
+                  !speechSupported
+                    ? 'cursor-not-allowed opacity-40'
+                    : showReadAloudPanel || readAloudMode
+                      ? 'reader-control-button-active'
+                      : ''
+                }`}
+                title={
+                  speechSupported
+                    ? showReadAloudPanel
+                      ? 'Close read aloud panel'
+                      : 'Open read aloud panel'
+                    : 'Read aloud is not supported in this browser'
+                }
+                disabled={!speechSupported}
+              >
+                <Volume2 size={16} />
+              </button>
+
+              {showReadAloudPanel && (
+                <div className="reader-floating-panel absolute right-0 top-full mt-1 w-72 rounded-xl p-3 z-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="reader-panel-label text-xs uppercase tracking-wider font-semibold">Read Aloud</span>
+                    <span className="reader-page-status text-[11px]">
+                      {isReading
+                        ? isPaused
+                          ? 'Paused'
+                          : `Reading${currentReadPage ? ` · Pg ${currentReadPage}` : ''}`
+                        : 'Ready'}
+                    </span>
+                  </div>
+                  <div className="reader-page-status mb-2 text-[11px]">
+                    Anchor: {anchorPreviewPage != null
+                      ? `Pg ${anchorPreviewPage + 1}${anchorPreviewToken != null ? ` · W${anchorPreviewToken + 1}` : ''}`
+                      : 'Not set (double-click a word)'}
+                  </div>
+                  {readAloudStatus && (
+                    <div className="mb-2 text-[11px] rounded-md px-2 py-1 reader-status-banner">
+                      {readAloudStatus}
+                    </div>
+                  )}
+                  {readAloudBuildId && (
+                    <div className="reader-page-status mb-2 text-[10px]">
+                      Build: {readAloudBuildId}
+                    </div>
+                  )}
+
+                  <label className="reader-panel-label block text-xs mb-1">Voice</label>
+                  <select
+                    value={ttsVoiceURI}
+                    onChange={(e) => setTtsVoiceURI(e.target.value)}
+                    className="reader-select w-full rounded-lg px-2.5 py-1.5 text-sm font-body focus:outline-none cursor-pointer"
+                  >
+                    {voiceOptions.map((voice) => (
+                      <option key={voice.voiceURI} value={voice.voiceURI}>
+                        {voice.name} ({voice.lang})
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="reader-panel-label text-xs">Speed</label>
+                      <span className="reader-page-status text-xs">{ttsRate.toFixed(1)}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={MIN_TTS_RATE}
+                      max={MAX_TTS_RATE}
+                      step={0.1}
+                      value={ttsRate}
+                      onChange={(e) => setTtsRate(Number(e.target.value))}
+                      className="reader-slider w-full cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={toggleReadAloud}
+                      className="reader-primary-action flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg transition-colors text-sm font-semibold cursor-pointer"
+                    >
+                      {isReading && !isPaused ? <Pause size={14} /> : <Play size={14} />}
+                      {isReading && !isPaused ? 'Pause' : isPaused ? 'Resume' : 'Read From Here'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleReadStopClick}
+                      disabled={!isReading}
+                      className="reader-secondary-action inline-flex items-center justify-center px-3 py-2 rounded-lg transition-colors disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+                      title="Stop"
+                    >
+                      <Square size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Separator */}
-            <div className="w-px h-5 bg-indigo/10 mx-1" />
+            <div className="reader-separator w-px h-5 mx-1" />
 
             {/* Characters toggle */}
             <button
               type="button"
               onClick={() => setShowCharacterPortraits((v) => !v)}
               className={`
-                inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm font-semibold
+                reader-characters-toggle inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm font-semibold
                 transition-all duration-200 cursor-pointer
                 ${showCharacterPortraits
-                  ? 'bg-primary/15 text-primary'
-                  : 'bg-indigo/5 text-indigo/40 hover:text-indigo/60 hover:bg-indigo/10'
+                  ? 'reader-control-button-active'
+                  : ''
                 }
               `}
               title="Toggle character portraits"
@@ -350,7 +1135,7 @@ export default function ReaderPage() {
             </button>
 
             {/* Page indicator */}
-            <span className="text-xs text-indigo/40 ml-1">
+            <span className="reader-page-status text-xs ml-1">
               Pg {displayPage}
             </span>
 
@@ -358,7 +1143,7 @@ export default function ReaderPage() {
             <button
               type="button"
               onClick={() => openWritingTools()}
-              className="p-1.5 rounded-lg text-indigo/30 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer group"
+              className="reader-control-button p-1.5 rounded-lg transition-all cursor-pointer group"
               title="Writing Tools"
             >
               <Wrench size={16} className="group-hover:rotate-[-15deg] transition-transform duration-200" />
@@ -368,7 +1153,7 @@ export default function ReaderPage() {
       </div>
 
       {/* Main Content Area — fills remaining viewport exactly */}
-      <div className="flex-1 min-h-0 px-6 py-4">
+      <div className="reader-stage flex-1 min-h-0 px-6 py-4">
         <div className="h-full max-w-[95vw] mx-auto">
           <BookPage
             content={currentChapter?.content || ''}
@@ -382,6 +1167,13 @@ export default function ReaderPage() {
             columnGap={COLUMN_GAP}
             spreadIndex={spreadIndex}
             onTotalSpreadsChange={handleTotalSpreadsChange}
+            onPagesTextChange={setChapterPagesText}
+            activeReadPageIndex={activeReadPageIndex}
+            activeReadCharIndex={activeReadCharIndex}
+            activeReadTokenIndex={activeReadTokenIndex}
+            onReadAnchorChange={handleReadAnchorChange}
+            readAloudMode={readAloudInteractionMode}
+            onReadAnchorActivate={handleReadAnchorActivate}
           />
         </div>
       </div>

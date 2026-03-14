@@ -1,4 +1,4 @@
-import { getUserId } from './client';
+import { getAuthHeaders } from './client';
 import type { ChapterContext } from '@/components/layout/WritingToolsContext';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api';
@@ -32,6 +32,12 @@ export interface ProofreadResult {
   summary: string;
 }
 
+export interface ReaderThemeResult {
+  badge: string;
+  mood: 'studio-soft' | 'sunwash-paper' | 'moonlit-noir' | 'neon-circuit' | 'dream-haze';
+  palette: string[];
+}
+
 /**
  * Send text to the AI proofread endpoint for structured grammar/spelling check.
  */
@@ -39,18 +45,40 @@ export async function proofreadText(
   text: string,
   chapterTitle?: string,
 ): Promise<ProofreadResult> {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+
   const response = await fetch(`${BASE}/ai/proofread`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': getUserId(),
-    },
+    headers,
     body: JSON.stringify({ text, chapterTitle }),
   });
 
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`Proofread error ${response.status}: ${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function generateReaderTheme(input: {
+  bookId: string;
+  coverImageId?: string | null;
+  description?: string;
+  genre?: string;
+  title: string;
+}): Promise<ReaderThemeResult> {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+
+  const response = await fetch(`${BASE}/ai/reader-theme`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Reader theme error ${response.status}: ${errText}`);
   }
 
   return response.json();
@@ -68,12 +96,11 @@ export async function* streamChat(
   messages: ChatMessage[],
   chapterContext?: ChapterContext | null,
 ): AsyncGenerator<string> {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+
   const response = await fetch(`${BASE}/ai/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': getUserId(),
-    },
+    headers,
     body: JSON.stringify({
       messages,
       chapterContext: chapterContext ?? undefined,
