@@ -900,7 +900,7 @@ export default function ReaderPage() {
     >
       {/* Top Bar */}
       <div className="reader-topbar shrink-0 z-50">
-        <div className="flex items-center justify-between px-6 py-2">
+        <div className="flex items-center justify-between px-2 sm:px-6 py-2">
           {/* Left: Back button */}
           <button
             type="button"
@@ -1115,14 +1115,14 @@ export default function ReaderPage() {
             </div>
 
             {/* Separator */}
-            <div className="reader-separator w-px h-5 mx-1" />
+            <div className="reader-separator w-px h-5 mx-1 hidden sm:block" />
 
             {/* Characters toggle */}
             <button
               type="button"
               onClick={() => setShowCharacterPortraits((v) => !v)}
               className={`
-                reader-characters-toggle inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm font-semibold
+                reader-characters-toggle hidden sm:inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm font-semibold
                 transition-all duration-200 cursor-pointer
                 ${showCharacterPortraits
                   ? 'reader-control-button-active'
@@ -1143,7 +1143,7 @@ export default function ReaderPage() {
             <button
               type="button"
               onClick={() => openWritingTools()}
-              className="reader-control-button p-1.5 rounded-lg transition-all cursor-pointer group"
+              className="reader-control-button p-1.5 rounded-lg transition-all cursor-pointer group hidden sm:inline-flex"
               title="Writing Tools"
             >
               <Wrench size={16} className="group-hover:rotate-[-15deg] transition-transform duration-200" />
@@ -1153,7 +1153,7 @@ export default function ReaderPage() {
       </div>
 
       {/* Main Content Area — fills remaining viewport exactly */}
-      <div className="reader-stage flex-1 min-h-0 px-6 py-4">
+      <div className="reader-stage flex-1 min-h-0 px-1 sm:px-6 py-1 sm:py-4">
         <div className="h-full max-w-[95vw] mx-auto">
           <BookPage
             content={currentChapter?.content || ''}

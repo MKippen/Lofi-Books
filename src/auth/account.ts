@@ -23,6 +23,7 @@ export function getAccountUserId(account: AccountLike | null | undefined): strin
 
 export function hasUsableAccountIdentity(account: AccountLike | null | undefined): boolean {
   const userId = getAccountUserId(account);
-  const hasDisplayIdentity = Boolean(account?.username || account?.name);
-  return Boolean(userId && hasDisplayIdentity);
+  // Consumer accounts may not return username/name in all flows
+  // A valid userId alone is sufficient to consider the account usable
+  return Boolean(userId);
 }

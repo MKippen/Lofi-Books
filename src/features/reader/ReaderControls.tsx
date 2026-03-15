@@ -25,7 +25,7 @@ export default function ReaderControls({
 
   return (
     <div className="reader-bottombar shrink-0 z-50">
-      <div className="flex items-center justify-between px-8 py-2">
+      <div className="flex items-center justify-between px-2 sm:px-8 py-2">
         {/* Previous button */}
         <button
           type="button"
@@ -38,7 +38,7 @@ export default function ReaderControls({
         </button>
 
         {/* Center: progress bar and chapter title */}
-        <div className="flex-1 mx-6 max-w-md">
+        <div className="flex-1 mx-2 sm:mx-6 max-w-md">
           <div className="reader-progress-track h-1.5 rounded-full overflow-hidden">
             <div
               className="reader-progress-fill h-full rounded-full transition-all duration-300"

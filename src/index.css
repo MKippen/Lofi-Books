@@ -835,3 +835,65 @@ body {
     padding-right: 1rem;
   }
 }
+
+/* ── Mobile Reader ──────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .reader-stage {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .reader-book-surface {
+    border-radius: 0.5rem;
+  }
+
+  /* Tighter content padding inside the book */
+  .reader-book-surface [data-content-area] {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .reader-page-frame {
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.4rem;
+  }
+
+  .reader-character-strip {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  /* Compact top bar */
+  .reader-topbar .reader-control-button,
+  .reader-topbar .reader-characters-toggle {
+    padding: 0.25rem;
+  }
+
+  .reader-topbar .reader-separator {
+    display: none;
+  }
+
+  /* Compact bottom bar */
+  .reader-bottombar > div {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .reader-bottombar .reader-nav-button {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .reader-bottombar .flex-1 {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
+}

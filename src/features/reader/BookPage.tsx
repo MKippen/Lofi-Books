@@ -628,7 +628,7 @@ export default function BookPage({
 
         {/* Character portraits — first spread only */}
         {mentionedCharacters.length > 0 && spreadIndex === 0 && (
-          <div className="reader-character-strip flex items-start gap-3 py-3 px-8 shrink-0">
+          <div className="reader-character-strip flex items-start gap-2 sm:gap-3 py-2 sm:py-3 px-2 sm:px-8 shrink-0">
             {mentionedCharacters.map((c) => (
               <CharacterPortrait key={c.id} character={c} />
             ))}
@@ -636,7 +636,7 @@ export default function BookPage({
         )}
 
         {/* Content area — padding wrapper */}
-        <div data-content-area className="flex-1 min-h-0 px-8 py-6">
+        <div data-content-area className="flex-1 min-h-0 px-2 sm:px-8 py-2 sm:py-6">
           <div
             ref={pageHostRef}
             className={columnCount >= 2 ? 'h-full grid grid-cols-2' : 'h-full grid grid-cols-1'}

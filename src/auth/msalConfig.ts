@@ -8,7 +8,7 @@ const postLogoutRedirectUri = import.meta.env.VITE_MSAL_POST_LOGOUT_REDIRECT_URI
 export const msalConfig: Configuration = {
   auth: {
     clientId: import.meta.env.VITE_MSAL_CLIENT_ID || '',
-    authority: import.meta.env.VITE_MSAL_AUTHORITY || 'https://login.microsoftonline.com/common',
+    authority: import.meta.env.VITE_MSAL_AUTHORITY || 'https://login.microsoftonline.com/consumers',
     redirectUri,
     postLogoutRedirectUri,
   },
