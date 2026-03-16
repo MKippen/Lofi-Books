@@ -22,13 +22,13 @@ describe('account auth helpers', () => {
     })).toBe('sub-id');
   });
 
-  it('rejects phantom sessions with no display identity', () => {
+  it('accepts consumer sessions that only expose a stable user id', () => {
     expect(hasUsableAccountIdentity({
       homeAccountId: 'home-id',
       localAccountId: 'local-id',
       username: '',
       name: '',
       idTokenClaims: { oid: 'oid-id' },
-    })).toBe(false);
+    })).toBe(true);
   });
 });
